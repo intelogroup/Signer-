@@ -1,3 +1,5 @@
+python-docx==0.8.11
+PyPDF2==3.0.1
 streamlit==1.39.0
 pandas==2.2.3
 requests==2.32.3
