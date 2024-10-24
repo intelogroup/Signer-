@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 from datetime import datetime, timedelta
 
 # Initialize session state
@@ -90,15 +89,13 @@ else:
             # Add document to both documents list and history
             if not any(doc['name'] == uploaded_file.name and doc['status'] == 'Pending' 
                       for doc in st.session_state['documents']):
-                new_doc = {
+                # Add to documents list
+                st.session_state['documents'].append({
                     'id': doc_id,
                     'name': uploaded_file.name,
                     'status': 'Pending',
                     'upload_time': upload_time
-                }
-                
-                # Add to documents list
-                st.session_state['documents'].append(new_doc)
+                })
                 
                 # Add to history with Pending status
                 st.session_state['history'].append({
@@ -168,38 +165,31 @@ else:
     if st.session_state['history']:
         df_history = pd.DataFrame(st.session_state['history'])
         
-        # 1. Document Status Distribution Pie Chart
+        # 1. Document Status Distribution
         st.subheader("Document Status Distribution")
         
         # Clean status column by removing emojis for counting
         status_counts = df_history['status'].apply(lambda x: x.split()[0]).value_counts()
         
-        # Create pie chart with custom colors
-        fig = px.pie(
-            values=status_counts.values,
-            names=status_counts.index,
-            color=status_counts.index,
-            color_discrete_map={
-                'Pending': '#FFA500',  # Orange
-                'Authorized': '#32CD32',  # Green
-                'Rejected': '#DC143C'   # Red
-            },
-            title="Document Status Distribution"
-        )
+        # Create the chart data
+        chart_data = pd.DataFrame({
+            'Status': status_counts.index,
+            'Count': status_counts.values
+        })
         
-        # Update layout for better visualization
-        fig.update_layout(
-            legend_title="Status",
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=-0.2,
-                xanchor="center",
-                x=0.5
-            )
-        )
-        
-        st.plotly_chart(fig)
+        # Display color legend
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.color_picker('Pending', '#FFA500', disabled=True)
+            st.write(f"Pending {STATUS_EMOJIS['Pending']}")
+        with col2:
+            st.color_picker('Authorized', '#32CD32', disabled=True)
+            st.write(f"Authorized {STATUS_EMOJIS['Authorized']}")
+        with col3:
+            st.color_picker('Rejected', '#DC143C', disabled=True)
+            st.write(f"Rejected {STATUS_EMOJIS['Rejected']}")
+            
+        st.bar_chart(chart_data.set_index('Status'))
         
         # 2. Time to Sign Analysis
         st.subheader("Signing Time Analysis")
@@ -220,4 +210,4 @@ else:
         total_docs = len(st.session_state['history'])
         daily_docs = df_history.groupby(df_history['date'].str[:10]).size()
         st.line_chart(daily_docs)
-        st.metric("Total Documents Processed", total_docs)
+        st.metric("Total Documents Processed", total_docs
