@@ -1,31 +1,30 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta
 import requests
-from anthropic import Anthropic
+import docx
+import PyPDF2
+import io
 
-# Initialize session state
-if 'logged_in' not in st.session_state:
-    st.session_state['logged_in'] = False
-if 'documents' not in st.session_state:
-    st.session_state['documents'] = []
-if 'doc_id_counter' not in st.session_state:
-    st.session_state['doc_id_counter'] = 1
-if 'document_removal_times' not in st.session_state:
-    st.session_state['document_removal_times'] = {}
-if 'api_key' not in st.session_state:
-    st.session_state['api_key'] = None
+# Get API key from Streamlit secrets
+CLAUDE_API_KEY = st.secrets["CLAUDE_API_KEY"]
 
-STATUS_EMOJIS = {'Pending': '⏳', 'Authorized': '✅', 'Rejected': '❌'}
+def extract_text_from_docx(file_bytes):
+    doc = docx.Document(io.BytesIO(file_bytes))
+    text = []
+    for paragraph in doc.paragraphs:
+        text.append(paragraph.text)
+    return '\n'.join(text)
 
-def analyze_with_claude(filename):
+def extract_text_from_pdf(file_bytes):
+    pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+    text = []
+    for page in pdf_reader.pages:
+        text.append(page.extract_text())
+    return '\n'.join(text)
+
+def analyze_with_claude(text):
     try:
-        if not st.session_state['api_key']:
-            st.error("Enter your Claude API key first")
-            return None
-
         headers = {
-            "x-api-key": st.session_state['api_key'],
+            "x-api-key": CLAUDE_API_KEY,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
@@ -33,9 +32,9 @@ def analyze_with_claude(filename):
         data = {
             "model": "claude-3-opus-20240229",
             "messages": [
-                {"role": "user", "content": f"Analyze document {filename}. Focus on key names like Kalinov Jim Rozensky DAMEUS. Limit response to 200 tokens."}
+                {"role": "user", "content": f"Analyze this document content. Focus on key information and names:\n\n{text}"}
             ],
-            "max_tokens": 200  # Changed from max_tokens_to_sample to max_tokens
+            "max_tokens": 500
         }
         
         response = requests.post(
@@ -46,92 +45,46 @@ def analyze_with_claude(filename):
         )
         
         if response.status_code == 200:
-            result = response.json()
-            # Updated to match the new API response structure
-            return result['content'][0]['text']
+            return response.json()['content'][0]['text']
         else:
-            st.error(f"API Error {response.status_code}: {response.text}")
+            st.error(f"API Error: {response.text}")
             return None
-
     except Exception as e:
-        st.error(f"Error analyzing document: {str(e)}")
+        st.error(f"Error: {str(e)}")
         return None
 
-def login_user(email, password):
-    return email == "admin" and password == "admin123"
-
-def check_expired_items():
-    current_time = datetime.now()
-    for doc_id, expiration_time in list(st.session_state['document_removal_times'].items()):
-        if current_time > expiration_time:
-            st.session_state['documents'] = [doc for doc in st.session_state['documents'] if doc['id'] != doc_id]
-            del st.session_state['document_removal_times'][doc_id]
-
-# Main app
 def main():
-    # Authentication
-    if not st.session_state['logged_in']:
-        st.title("Document Signer 📝")
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-        if st.button("Login"):
-            if login_user(email, password):
-                st.session_state['logged_in'] = True
-                st.success("Login successful!")
-                st.rerun()
-            else:
-                st.error("Invalid email or password")
-    else:
-        # API Key
-        st.sidebar.title("Configuration")
-        api_key = st.sidebar.text_input("Enter Claude API Key", type="password")
-        if st.sidebar.button("Save API Key"):
-            st.session_state['api_key'] = api_key
-            st.sidebar.success("API Key saved!")
-
-        # Document Upload and Analysis
-        st.title("Document Signer ✒️")
-        uploaded_files = st.file_uploader("Upload Document(s)", type=['pdf', 'docx'], accept_multiple_files=True)
+    st.title("Document Content Analyzer 📄")
+    
+    uploaded_file = st.file_uploader("Upload a document", type=['pdf', 'docx'])
+    
+    if uploaded_file:
+        st.write("Analyzing document:", uploaded_file.name)
         
-        if uploaded_files and st.session_state['api_key']:
-            for uploaded_file in uploaded_files:
-                doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
-                st.session_state['doc_id_counter'] += 1
-                upload_time = datetime.now()
-
-                # Claude Analysis
-                analysis = analyze_with_claude(uploaded_file.name)
-                if analysis:
-                    st.session_state['documents'].append({
-                        'id': doc_id,
-                        'name': uploaded_file.name,
-                        'status': 'Pending',
-                        'analysis': analysis
-                    })
-                    st.session_state['document_removal_times'][doc_id] = upload_time + timedelta(minutes=5)
-                    with st.expander(f"Analysis for {uploaded_file.name}"):
+        # Extract text based on file type
+        try:
+            file_bytes = uploaded_file.read()
+            if uploaded_file.type == "application/pdf":
+                text = extract_text_from_pdf(file_bytes)
+            else:  # docx
+                text = extract_text_from_docx(file_bytes)
+            
+            if text.strip():
+                # Get analysis from Claude
+                with st.spinner("Getting analysis from Claude..."):
+                    analysis = analyze_with_claude(text)
+                    if analysis:
+                        st.subheader("Analysis Results")
                         st.write(analysis)
-
-        # Display Documents
-        st.header("Document Status")
-        check_expired_items()  # Check for expired documents
-        
-        for doc in st.session_state['documents']:
-            col1, col2, col3 = st.columns([3, 1, 1])
-            with col1:
-                st.write(f"{doc['name']} | {doc['status']} {STATUS_EMOJIS[doc['status']]}")
-            with col2:
-                if st.button(f"Authorize {doc['id']}", key=f"auth_{doc['id']}"):
-                    doc['status'] = 'Authorized'
-                    st.rerun()
-            with col3:
-                if st.button(f"Reject {doc['id']}", key=f"reject_{doc['id']}"):
-                    doc['status'] = 'Rejected'
-                    st.rerun()
-
-        if st.sidebar.button("Logout"):
-            st.session_state['logged_in'] = False
-            st.rerun()
+                        
+                        # Show extracted text in expander
+                        with st.expander("View Extracted Text"):
+                            st.text(text)
+            else:
+                st.error("No text could be extracted from the document")
+                
+        except Exception as e:
+            st.error(f"Error processing document: {str(e)}")
 
 if __name__ == "__main__":
     main()
