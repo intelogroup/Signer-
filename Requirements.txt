@@ -4,3 +4,4 @@ pandas==2.1.4
 plotly==5.18.0
 anthropic==0.8.1
 python-dotenv==1.0.0
+requests==2.31.0
