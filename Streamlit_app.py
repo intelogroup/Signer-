@@ -4,16 +4,20 @@ import requests
 # Get API key from Streamlit secrets
 CLAUDE_API_KEY = st.secrets["CLAUDE_API_KEY"]
 
-def read_file_content(uploaded_file):
-    """Read content from uploaded file"""
+def extract_text_content(uploaded_file):
+    """Attempt to extract text content from uploaded file"""
     try:
+        # Try to decode as text
         content = uploaded_file.read()
-        return content.decode('utf-8')
-    except UnicodeDecodeError:
-        return str(content)
+        try:
+            # First try utf-8
+            return content.decode('utf-8')
+        except UnicodeDecodeError:
+            # If utf-8 fails, try latin-1 as fallback
+            return content.decode('latin-1')
     except Exception as e:
-        st.error(f"Error reading file: {str(e)}")
-        return None
+        st.warning(f"Note: File content might not be perfectly extracted. Proceeding with best effort.")
+        return str(content)  # Return as string representation if all else fails
 
 def analyze_with_claude(text):
     try:
@@ -30,6 +34,7 @@ def analyze_with_claude(text):
 3. DOCUMENT TYPE: Identify the type or purpose of the document
 4. DATES & NUMBERS: List any significant dates, numbers, or quantities
 5. RELATIONSHIPS: Identify any relationships or connections between named entities
+6. SUMMARY: Provide a brief summary of the document's main purpose
 
 Please be precise and factual. If you're uncertain about any information, indicate that explicitly.
 
@@ -62,81 +67,78 @@ Document content to analyze:
         st.error(f"Error: {str(e)}")
         return None
 
-# Initialize session state
-if 'analyses' not in st.session_state:
-    st.session_state['analyses'] = {}
-
-st.title("Multi-Document Content Analyzer 📄")
-
-# File upload section
-uploaded_files = st.file_uploader(
-    "Upload documents", 
-    type=['txt', 'csv', 'json', 'md'],
-    accept_multiple_files=True
-)
-
-if uploaded_files:
-    # Process new files
-    for uploaded_file in uploaded_files:
-        st.write(f"📄 Processing: {uploaded_file.name}")
+def main():
+    st.title("📄 Universal Document Analyzer")
+    
+    # File upload - now accepts any file type
+    uploaded_file = st.file_uploader("Upload any document", type=None)
+    
+    if uploaded_file:
+        st.write("📄 Analyzing:", uploaded_file.name)
+        file_details = {
+            "Filename": uploaded_file.name,
+            "File type": uploaded_file.type,
+            "File size": f"{uploaded_file.size / 1024:.2f} KB"
+        }
+        
+        # Display file details in expander
+        with st.expander("📌 File Details"):
+            for key, value in file_details.items():
+                st.write(f"**{key}:** {value}")
         
         try:
-            # Read file content
-            text_content = read_file_content(uploaded_file)
+            # Extract text content
+            text_content = extract_text_content(uploaded_file)
             
-            if text_content and text_content.strip():
-                # Show content
-                st.text_area(f"Content of {uploaded_file.name}", text_content, height=150)
+            if text_content.strip():
+                # Show text content in expander
+                with st.expander("📝 View Extracted Content"):
+                    st.text_area("Content Preview", text_content[:5000] + ("..." if len(text_content) > 5000 else ""), 
+                                height=200)
                 
-                # Analyze button for each file
-                if st.button(f"Analyze {uploaded_file.name}"):
-                    with st.spinner("Analyzing..."):
-                        analysis = analyze_with_claude(text_content)
-                        if analysis:
-                            # Store in session state
-                            st.session_state['analyses'][uploaded_file.name] = {
-                                'content': text_content,
-                                'analysis': analysis
+                # Get analysis from Claude
+                with st.spinner("🔍 Analyzing document..."):
+                    analysis = analyze_with_claude(text_content)
+                    if analysis:
+                        st.subheader("📊 Analysis Results")
+                        
+                        tab1, tab2 = st.tabs(["Formatted Analysis", "Raw Analysis"])
+                        
+                        with tab1:
+                            sections = analysis.split('\n')
+                            current_section = ""
+                            for section in sections:
+                                if any(header in section for header in ["NAMES:", "KEY INFORMATION:", "DOCUMENT TYPE:", 
+                                                                      "DATES & NUMBERS:", "RELATIONSHIPS:", "SUMMARY:"]):
+                                    st.markdown(f"### {section}")
+                                    current_section = section
+                                elif section.strip():
+                                    st.write(section)
+                        
+                        with tab2:
+                            st.text_area("Full Analysis", analysis, height=300)
+                        
+                        # Save analysis
+                        if st.button("💾 Save Analysis"):
+                            st.session_state['last_analysis'] = {
+                                'filename': uploaded_file.name,
+                                'analysis': analysis,
+                                'timestamp': str(pd.Timestamp.now())
                             }
-                            st.success(f"Analysis completed for {uploaded_file.name}")
-                            st.rerun()
+                            st.success("✅ Analysis saved!")
+            else:
+                st.error("❗ No readable content found in the file")
                 
         except Exception as e:
-            st.error(f"Error processing {uploaded_file.name}: {str(e)}")
-
-# Display analyses section
-if st.session_state['analyses']:
-    st.header("📋 Analyses")
+            st.error(f"❌ Error processing document: {str(e)}")
     
-    # Create tabs for each analysis
-    analysis_names = list(st.session_state['analyses'].keys())
-    if analysis_names:
-        tabs = st.tabs(analysis_names)
-        
-        for tab, name in zip(tabs, analysis_names):
-            with tab:
-                analysis_data = st.session_state['analyses'][name]
-                
-                # Display formatted analysis
-                st.subheader("Analysis Results")
-                sections = analysis_data['analysis'].split('\n')
-                for section in sections:
-                    if any(header in section for header in [
-                        "NAMES:", "KEY INFORMATION:", 
-                        "DOCUMENT TYPE:", "DATES & NUMBERS:", 
-                        "RELATIONSHIPS:"
-                    ]):
-                        st.markdown(f"**{section}**")
-                    elif section.strip():
-                        st.write(section)
-                
-                # Remove analysis button
-                if st.button(f"Remove Analysis", key=f"remove_{name}"):
-                    del st.session_state['analyses'][name]
-                    st.rerun()
+    # Display saved analysis if it exists
+    if 'last_analysis' in st.session_state:
+        with st.expander("📋 Previous Analysis"):
+            saved = st.session_state['last_analysis']
+            st.write(f"File: {saved['filename']}")
+            st.write(f"Analyzed: {saved['timestamp']}")
+            st.write(saved['analysis'])
 
-# Clear all button
-if st.session_state['analyses']:
-    if st.button("Clear All Analyses"):
-        st.session_state['analyses'] = {}
-        st.rerun()
+if __name__ == "__main__":
+    main()
