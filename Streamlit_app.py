@@ -1,9 +1,9 @@
 import requests
 import streamlit as st
 
-def analyze_with_claude(filename, file_type):
+def analyze_with_claude(file, filename, file_type):
     """
-    Analyzes a document using the Claude API, sending a request with the document's filename and type, and returns a response.
+    Analyzes a document using the Claude API, sending a request with the document's content, filename, and type, and returns a response.
     Includes error handling and user prompts.
     """
     try:
@@ -11,6 +11,9 @@ def analyze_with_claude(filename, file_type):
         if not st.session_state.get('api_key'):
             st.error("Please enter your Claude API key first")
             return None
+
+        # Read the content of the uploaded file
+        file_content = file.read().decode('utf-8', errors='ignore')
 
         # Define the necessary headers, including the correct 'anthropic-version' header
         headers = {
@@ -26,6 +29,7 @@ def analyze_with_claude(filename, file_type):
                 {
                     "role": "user",
                     "content": f"A document named {filename} of type {file_type} has been uploaded for review. "
+                               "Here is the content of the document:\n\n{file_content}\n\n"
                                "Please provide:\n1. Brief acknowledgment of the document type.\n"
                                "2. Note to check for any mention of Kalinov Jim Rozensky DAMEUS.\n"
                                "3. Standard processing recommendations."
@@ -80,7 +84,7 @@ if uploaded_file:
 
     # Trigger the analysis when the "Analyze" button is clicked
     if st.button("Analyze"):
-        result = analyze_with_claude(uploaded_file.name, file_type)
+        result = analyze_with_claude(uploaded_file, uploaded_file.name, file_type)
         if result:
             st.write("Analysis Result:")
             st.write(result)
