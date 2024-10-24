@@ -28,37 +28,45 @@ STATUS_EMOJIS = {
     'Rejected': '❌'
 }
 
-def analyze_with_claude(content, file_type):
+def analyze_with_claude(content):
     try:
         api_key = "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"
         
         headers = {
-            "anthropic-version": "2023-06-01",
+            "x-api-key": api_key,
             "content-type": "application/json",
-            "x-api-key": api_key
+            "anthropic-version": "2023-06-01"
         }
         
         data = {
             "model": "claude-3-opus-20240229",
-            "max_tokens": 1024,
-            "messages": [{
-                "role": "user",
-                "content": f"Analyze this {file_type} document content: {content}"
-            }]
+            "messages": [
+                {
+                    "role": "user",
+                    "content": f"Analyze this document and provide:\n1. Brief summary\n2. Names mentioned\n3. Any actions requested specifically for Kalinov Jim Rozensky DAMEUS.\n\nDocument content: {content}"
+                }
+            ]
         }
-
+        
+        st.write("Sending request to Claude API...")  # Debug line
+        
         response = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers=headers,
-            json=data
+            json=data,
+            timeout=30
         )
+        
+        st.write(f"Response status code: {response.status_code}")  # Debug line
+        st.write(f"Response content: {response.text}")  # Debug line
         
         if response.status_code == 200:
             result = response.json()
-            return result['content'][0]['text']
-        else:
-            st.error(f"API Error {response.status_code}: {response.text}")
-            return None
+            if 'content' in result and len(result['content']) > 0:
+                return result['content'][0]['text']
+        
+        st.error(f"API Error {response.status_code}: {response.text}")
+        return None
             
     except Exception as e:
         st.error(f"Error analyzing document: {str(e)}")
@@ -146,50 +154,58 @@ else:
 
     if uploaded_files:
         for uploaded_file in uploaded_files:
-            doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
-            st.session_state['doc_id_counter'] += 1
-            upload_time = datetime.now()
-            
-            # Read and analyze document
             try:
+                # Read file content
                 content = uploaded_file.getvalue().decode('utf-8')
-                analysis = analyze_with_claude(content, uploaded_file.type)
+                
+                # Analyze with Claude
+                st.info("Analyzing document...")
+                analysis = analyze_with_claude(content)
                 
                 if analysis:
-                    st.info(f"Analysis for {uploaded_file.name}:\n{analysis}")
+                    st.success("Analysis completed!")
+                    st.write("Analysis:", analysis)
                     
-                    # Send email
-                    email_sent = send_email(
-                        uploaded_file.name,
-                        uploaded_file.type,
-                        analysis
-                    )
-                    if email_sent:
-                        st.success(f"Analysis sent to jimkalinov@gmail.com")
+                    # Process document
+                    doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
+                    st.session_state['doc_id_counter'] += 1
+                    upload_time = datetime.now()
                     
-                # Add to documents list
-                if not any(doc['name'] == uploaded_file.name and doc['status'] == 'Pending' 
-                          for doc in st.session_state['documents']):
-                    
-                    doc_data = {
-                        'id': doc_id,
-                        'name': uploaded_file.name,
-                        'status': 'Pending',
-                        'upload_time': upload_time,
-                        'analysis': analysis
-                    }
-                    
-                    st.session_state['documents'].append(doc_data)
-                    
-                    # Add to history with Pending status
-                    st.session_state['history'].append({
-                        'date': upload_time.strftime("%Y-%m-%d %H:%M:%S"),
-                        'id': doc_id,
-                        'name': uploaded_file.name,
-                        'status': f"Pending {STATUS_EMOJIS['Pending']}",
-                        'analysis': analysis
-                    })
-                    
+                    # Add to documents list
+                    if not any(doc['name'] == uploaded_file.name and doc['status'] == 'Pending' 
+                              for doc in st.session_state['documents']):
+                        
+                        doc_data = {
+                            'id': doc_id,
+                            'name': uploaded_file.name,
+                            'status': 'Pending',
+                            'upload_time': upload_time,
+                            'analysis': analysis
+                        }
+                        
+                        st.session_state['documents'].append(doc_data)
+                        
+                        # Add to history
+                        st.session_state['history'].append({
+                            'date': upload_time.strftime("%Y-%m-%d %H:%M:%S"),
+                            'id': doc_id,
+                            'name': uploaded_file.name,
+                            'status': f"Pending {STATUS_EMOJIS['Pending']}",
+                            'analysis': analysis
+                        })
+                        
+                        # Try to send email
+                        try:
+                            email_sent = send_email(
+                                uploaded_file.name,
+                                'text/plain',
+                                analysis
+                            )
+                            if email_sent:
+                                st.success(f"Analysis sent to jimkalinov@gmail.com")
+                        except Exception as e:
+                            st.warning(f"Could not send email: {str(e)}")
+                
             except Exception as e:
                 st.error(f"Error processing {uploaded_file.name}: {str(e)}")
                 continue
