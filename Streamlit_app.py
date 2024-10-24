@@ -1,90 +1,57 @@
-import requests
 import streamlit as st
+import requests
 
-def analyze_with_claude(file, filename, file_type):
+def analyze_with_claude(file_content, filename, api_key):
     """
-    Analyzes a document using the Claude API, sending a request with the document's content, filename, and type, and returns a response.
-    Includes error handling and user prompts.
+    Sends the file content to Claude API for analysis.
     """
-    try:
-        # Ensure API key is present
-        if not st.session_state.get('api_key'):
-            st.error("Please enter your Claude API key first")
-            return None
+    # Prepare the API request body
+    data = {
+        "model": "claude-3-opus-20240229",
+        "messages": [
+            {
+                "role": "user",
+                "content": f"The document named {filename} has been uploaded. Here is the content:\n\n{file_content}\n\n"
+                           "Please analyze this document."
+            }
+        ],
+        "max_tokens": 500  # Adjust token limit based on response size needed
+    }
 
-        # Read the content of the uploaded file
-        file_content = file.read().decode('utf-8', errors='ignore')
+    # API request headers
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01"
+    }
 
-        # Define the necessary headers, including the correct 'anthropic-version' header
-        headers = {
-            "x-api-key": st.session_state['api_key'],
-            "content-type": "application/json",
-            "anthropic-version": "2023-06-01"  # Correct version for the Claude API
-        }
+    # Send the POST request to Claude API
+    response = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=data)
 
-        # Define the request body for Claude API
-        data = {
-            "model": "claude-3-opus-20240229",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": f"A document named {filename} of type {file_type} has been uploaded for review. "
-                               "Here is the content of the document:\n\n{file_content}\n\n"
-                               "Please provide:\n1. Brief acknowledgment of the document type.\n"
-                               "2. Note to check for any mention of Kalinov Jim Rozensky DAMEUS.\n"
-                               "3. Standard processing recommendations."
-                }
-            ],
-            "max_tokens": 500  # Setting the maximum number of tokens for the response
-        }
+    # Check for successful response
+    if response.status_code == 200:
+        return response.json()['messages'][0]['content']
+    else:
+        return f"API Error {response.status_code}: {response.text}"
 
-        # Send the POST request to Claude API
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers=headers,
-            json=data,
-            timeout=30
-        )
-
-        # Process the API response
-        if response.status_code == 200:
-            result = response.json()
-
-            # Check if the response contains content and handle it
-            if 'content' in result and len(result['content']) > 0:
-                return result['content'][0]['text']
-
-        # Handle errors by providing detailed feedback
-        else:
-            st.error(f"API Error {response.status_code}: {response.text}")
-            return None
-
-    # Catch and display any exceptions that occur during the API request
-    except Exception as e:
-        st.error(f"Error analyzing document: {str(e)}")
-        return None
-
-
-# Example usage with Streamlit
+# Streamlit app logic
 st.title("Document Analyzer with Claude")
 
-# Add input fields for the API key, filename, and file type
+# Input API key
 if 'api_key' not in st.session_state:
-    st.session_state['api_key'] = ""
+    st.session_state['api_key'] = st.text_input("Enter your Claude API key:", type="password")
 
-st.session_state['api_key'] = st.text_input("Enter your Claude API key:", type="password")
+# Upload a text file
+uploaded_file = st.file_uploader("Upload a .txt document", type=["txt"])
 
-# Document upload logic (Streamlit allows file uploading)
-uploaded_file = st.file_uploader("Upload a document", type=["pdf", "docx", "txt"])
-
-# Optional: Detect file type based on the file extension
 if uploaded_file:
-    file_type = uploaded_file.name.split('.')[-1]  # Get file extension
-    st.write(f"Uploaded file: {uploaded_file.name} of type {file_type}")
+    # Read the content of the uploaded file
+    file_content = uploaded_file.read().decode('utf-8', errors='ignore')  # Decode the text content
 
-    # Trigger the analysis when the "Analyze" button is clicked
+    # Analyze the file using Claude API if "Analyze" button is clicked
     if st.button("Analyze"):
-        result = analyze_with_claude(uploaded_file, uploaded_file.name, file_type)
-        if result:
-            st.write("Analysis Result:")
-            st.write(result)
+        result = analyze_with_claude(file_content, uploaded_file.name, st.session_state['api_key'])
+        
+        # Display the analysis result
+        st.write("Analysis Result:")
+        st.write(result)
