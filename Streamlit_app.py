@@ -2,10 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
-import plotly.express as px
-import numpy as np
 import json
-import io
 
 # Initialize session state with all required variables
 if 'logged_in' not in st.session_state:
@@ -149,7 +146,7 @@ def show_upload_section():
             col1, col2 = st.columns([4, 1])
             with col1:
                 selected = st.checkbox(
-                    f"📄 {doc['name']} ({doc['file_type']}) - {doc['file_size']/1024:.1f} KB",
+                    f"📄 {doc['name']} ({doc['file_type'] or 'unknown type'}) - {doc['file_size']/1024:.1f} KB",
                     key=f"select_{doc['id']}"
                 )
                 if selected:
@@ -308,125 +305,6 @@ def show_history_section():
     else:
         st.info("No document history available")
 
-def main():
-    if not st.session_state['logged_in']:
-        st.title("Document Analyzer & Signer 📝")
-        with st.form("login_form"):
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Login")
-            if submitted:
-                if login_user(email, password):
-                    st.session_state['logged_in'] = True
-                    log_user_action('login', 'User logged in')
-                    st.success("Login successful!")
-                    st.rerun()
-                else:
-                    st.error("Invalid email or password")
-    else:
-        # Header with profile menu
-        header_col1, header_col2 = st.columns([0.7, 0.3])
-        with header_col1:
-            st.title("Document Analyzer & Signer ✒️")
-        with header_col2:
-            with st.expander("👤 Profile Menu"):
-                st.write(f"Welcome, Admin!")
-                st.divider()
-                if st.button("📊 Dashboard"):
-                    st.session_state['selected_view'] = 'Analytics'
-                if st.button("👤 My Profile"):
-                    st.info("Profile settings coming soon")
-                if st.button("ℹ️ About"):
-                    st.info("Document Analyzer & Signer v3.0")
-                if st.button("🚪 Logout"):
-                    log_user_action('logout', 'User logged out')
-                    st.session_state['logged_in'] = False
-                    st.rerun()
-        
-        # Navigation
-        st.sidebar.title("Navigation")
-        view = st.sidebar.radio("Go to", 
-                              ["Upload", "Status", "History", "Analytics"],
-                              key="selected_view")
-        
-        # Main content based on selected view
-        # Main content based on selected view
-        if view == "Upload":
-            show_upload_section()
-        elif view == "Status":
-            show_status_section()
-        elif view == "History":
-            show_history_section()
-        elif view == "Analytics":
-            st.header("Analytics Dashboard 📊")
-            
-            # Basic analytics - Part 1 (more advanced features coming in Part 2)
-            if st.session_state['history']:
-                tab1, tab2 = st.tabs(["Document Overview", "Processing Times"])
-                
-                with tab1:
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        # Status Distribution
-                        st.subheader("Document Status Distribution")
-                        df_history = pd.DataFrame(st.session_state['history'])
-                        status_counts = df_history['status'].apply(lambda x: x.split()[0]).value_counts()
-                        st.bar_chart(status_counts)
-                    
-                    with col2:
-                        # Quick Stats
-                        st.subheader("Quick Statistics")
-                        total_docs = len(df_history)
-                        pending_docs = len([d for d in st.session_state['documents'] if d['status'] == 'Pending'])
-                        analyzed_docs = len([d for d in st.session_state['documents'] if 'analysis' in d])
-                        
-                        st.metric("Total Documents", total_docs)
-                        st.metric("Pending Documents", pending_docs)
-                        st.metric("Analyzed Documents", analyzed_docs)
-                
-                with tab2:
-                    if st.session_state['action_times']:
-                        st.subheader("Processing Time Analysis")
-                        time_diffs = [(action - upload).total_seconds() 
-                                    for upload, action in st.session_state['action_times']]
-                        
-                        avg_time = sum(time_diffs) / len(time_diffs)
-                        max_time = max(time_diffs)
-                        min_time = min(time_diffs)
-                        
-                        cols = st.columns(3)
-                        with cols[0]:
-                            st.metric("Average Time", f"{avg_time:.1f}s")
-                        with cols[1]:
-                            st.metric("Fastest", f"{min_time:.1f}s")
-                        with cols[2]:
-                            st.metric("Slowest", f"{max_time:.1f}s")
-                        
-                        # Processing Time Trend
-                        st.subheader("Processing Time Trend")
-                        time_df = pd.DataFrame(time_diffs, columns=['seconds'])
-                        st.line_chart(time_df)
-                
-                # Document Volume Trend
-                st.subheader("Document Volume Trend")
-                df_history['date'] = pd.to_datetime(df_history['date'])
-                daily_volumes = df_history.groupby(df_history['date'].dt.date).size()
-                st.area_chart(daily_volumes)
-                
-                # Pending Analysis
-                if st.session_state['pending_analysis']:
-                    st.subheader("Documents Awaiting Analysis")
-                    pending_df = pd.DataFrame(st.session_state['pending_analysis'])
-                    st.dataframe(
-                        pending_df[['name', 'upload_time', 'file_type', 'file_size']],
-                        hide_index=True
-                    )
-            else:
-                st.info("No data available for analytics yet")
-
-if __name__ == "__main__":
-    main()  
-
 def show_enhanced_analytics():
     st.title("Enhanced Analytics Dashboard 📊")
     
@@ -461,6 +339,13 @@ def show_enhanced_analytics():
                 st.metric("Total Documents", total_docs)
                 st.metric("Pending Documents", pending_docs)
                 st.metric("Analyzed Documents", analyzed_docs)
+                
+                # Processing Status
+                st.subheader("Processing Status")
+                total_processed = len(st.session_state['action_times'])
+                if total_processed > 0:
+                    st.metric("Documents Processed", total_processed)
+                    st.metric("Processing Rate", f"{(total_processed/total_docs*100):.1f}%")
     
     with tabs[1]:  # User Activity
         st.header("User Activity Analysis")
@@ -478,6 +363,12 @@ def show_enhanced_analytics():
             st.subheader("Action Type Distribution")
             action_counts = df_actions['action'].value_counts()
             st.bar_chart(action_counts)
+            
+            # Recent Activity Log
+            st.subheader("Recent Activity")
+            recent_actions = df_actions.sort_values('timestamp', ascending=False).head(10)
+            for _, action in recent_actions.iterrows():
+                st.text(f"{action['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} - {action['action']}: {action['details']}")
     
     with tabs[2]:  # Performance Metrics
         st.header("Performance Metrics")
@@ -498,6 +389,11 @@ def show_enhanced_analytics():
                     st.metric("Average Processing Time", f"{avg_time:.1f}s")
                     st.metric("Fastest Processing", f"{min_time:.1f}s")
                     st.metric("Slowest Processing", f"{max_time:.1f}s")
+                    
+                    # Time Distribution Chart
+                    st.subheader("Processing Time Distribution")
+                    time_df = pd.DataFrame(time_diffs, columns=['seconds'])
+                    st.line_chart(time_df)
             
             with col2:
                 # Success Metrics
@@ -511,6 +407,14 @@ def show_enhanced_analytics():
                     
                     st.metric("Approval Rate", f"{approval_rate:.1%}")
                     st.metric("Rejection Rate", f"{rejection_rate:.1%}")
+                    
+                    # Daily Success Rate Trend
+                    st.subheader("Daily Success Rate Trend")
+                    df_history['date'] = pd.to_datetime(df_history['date'])
+                    daily_approval = df_history[df_history['status'].str.contains('Authorized')].groupby(
+                        df_history['date'].dt.date
+                    ).size()
+                    st.line_chart(daily_approval)
     
     with tabs[3]:  # Custom Reports
         st.header("Custom Report Generator")
@@ -569,18 +473,56 @@ def show_enhanced_analytics():
             ):
                 st.success("Report downloaded successfully!")
 
-# Update the main function's analytics section
 def main():
-    # ... (keep all the existing main code until the view selection)
-    
-    if view == "Upload":
-        show_upload_section()
-    elif view == "Status":
-        show_status_section()
-    elif view == "History":
-        show_history_section()
-    elif view == "Analytics":
-        show_enhanced_analytics()
+    if not st.session_state['logged_in']:
+        st.title("Document Analyzer & Signer 📝")
+        with st.form("login_form"):
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Login")
+            if submitted:
+                if login_user(email, password):
+                    st.session_state['logged_in'] = True
+                    log_user_action('login', 'User logged in')
+                    st.success("Login successful!")
+                    st.rerun()
+                else:
+                    st.error("Invalid email or password")
+    else:
+        # Header with profile menu
+        header_col1, header_col2 = st.columns([0.7, 0.3])
+        with header_col1:
+            st.title("Document Analyzer & Signer ✒️")
+        with header_col2:
+            with st.expander("👤 Profile Menu"):
+                st.write(f"Welcome, Admin!")
+                st.divider()
+                if st.button("📊 Dashboard"):
+                    st.session_state['selected_view'] = 'Analytics'
+                if st.button("👤 My Profile"):
+                    st.info("Profile settings coming soon")
+                if st.button("ℹ️ About"):
+                    st.info("Document Analyzer & Signer v3.0")
+                if st.button("🚪 Logout"):
+                    log_user_action('logout', 'User logged out')
+                    st.session_state['logged_in'] = False
+                    st.rerun()
+        
+        # Navigation
+        st.sidebar.title("Navigation")
+        view = st.sidebar.radio("Go to", 
+                              ["Upload", "Status", "History", "Analytics"],
+                              key="selected_view")
+        
+        # Main content based on selected view
+        if view == "Upload":
+            show_upload_section()
+        elif view == "Status":
+            show_status_section()
+        elif view == "History":
+            show_history_section()
+        elif view == "Analytics":
+            show_enhanced_analytics()
 
 if __name__ == "__main__":
     main()
