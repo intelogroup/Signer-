@@ -1,133 +1,85 @@
-import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta
 import requests
+import streamlit as st
 
-# Initialize session state
-for key in ['logged_in', 'documents', 'history', 'doc_id_counter', 'document_removal_times', 'api_key', 'processed_docs']:
-    if key not in st.session_state:
-        st.session_state[key] = {
-            'logged_in': False,
-            'documents': [],
-            'history': [],
-            'doc_id_counter': 1,
-            'document_removal_times': {},
-            'api_key': None,
-            'processed_docs': set()
-        }[key]
-
-# Status emojis
-STATUS_EMOJIS = {
-    'Pending': '⏳',
-    'Authorized': '✅',
-    'Rejected': '❌'
-}
-
-# Analyze document function with API call
 def analyze_with_claude(filename, file_type):
-    if not st.session_state['api_key']:
-        st.error("Please enter your Claude API key first")
-        return None
-
-    headers = {
-        "x-api-key": st.session_state['api_key'],
-        "content-type": "application/json",
-    }
-    data = {
-        "model": "claude-3-opus-20240229",
-        "messages": [{"role": "user", "content": f"Document {filename}, type {file_type}. Check for 'Kalinov Jim Rozensky DAMEUS' and provide processing recommendations."}]
-    }
-
+    """
+    Analyzes a document using the Claude API, sending a request with the document's filename and type, and returns a response.
+    Includes error handling and user prompts.
+    """
     try:
-        response = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=data, timeout=30)
+        # Ensure API key is present
+        if not st.session_state.get('api_key'):
+            st.error("Please enter your Claude API key first")
+            return None
+
+        # Define the necessary headers, including the correct 'anthropic-version' header
+        headers = {
+            "x-api-key": st.session_state['api_key'],
+            "content-type": "application/json",
+            "anthropic-version": "2023-06-01"  # Correct version for the Claude API
+        }
+
+        # Define the request body for Claude API
+        data = {
+            "model": "claude-3-opus-20240229",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": f"A document named {filename} of type {file_type} has been uploaded for review. "
+                               "Please provide:\n1. Brief acknowledgment of the document type.\n"
+                               "2. Note to check for any mention of Kalinov Jim Rozensky DAMEUS.\n"
+                               "3. Standard processing recommendations."
+                }
+            ]
+        }
+
+        # Send the POST request to Claude API
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json=data,
+            timeout=30
+        )
+
+        # Process the API response
         if response.status_code == 200:
             result = response.json()
-            return result.get('content', [{}])[0].get('text', None)
+
+            # Check if the response contains content and handle it
+            if 'content' in result and len(result['content']) > 0:
+                return result['content'][0]['text']
+
+        # Handle errors by providing detailed feedback
         else:
             st.error(f"API Error {response.status_code}: {response.text}")
+            return None
+
+    # Catch and display any exceptions that occur during the API request
     except Exception as e:
         st.error(f"Error analyzing document: {str(e)}")
+        return None
 
-# Login function
-def login_user(email, password):
-    return email == "admin" and password == "admin123"
 
-# Auto-remove expired documents from pending list
-def check_expired_items():
-    current_time = datetime.now()
-    expired_docs = [doc_id for doc_id, exp_time in st.session_state['document_removal_times'].items() if current_time > exp_time]
-    for doc_id in expired_docs:
-        st.session_state['documents'] = [doc for doc in st.session_state['documents'] if doc['id'] != doc_id]
-        del st.session_state['document_removal_times'][doc_id]
+# Example usage with Streamlit
+st.title("Document Analyzer with Claude")
 
-# Main logic for logged in user
-if not st.session_state['logged_in']:
-    st.title("Document Signer 📝")
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-    if st.button("Login") and login_user(email, password):
-        st.session_state['logged_in'] = True
-        st.success("Login successful!")
-        st.rerun()
-else:
-    check_expired_items()
-    
-    st.sidebar.title("Configuration")
-    api_key = st.sidebar.text_input("Enter Claude API Key", type="password")
-    if st.sidebar.button("Save API Key"):
-        st.session_state['api_key'] = api_key
-        st.sidebar.success("API Key saved!")
-        
-    col1, col2 = st.columns([0.9, 0.1])
-    with col2:
-        with st.expander("👤"):
-            if st.button("Logout"):
-                st.session_state['logged_in'] = False
-                st.rerun()
+# Add input fields for the API key, filename, and file type
+if 'api_key' not in st.session_state:
+    st.session_state['api_key'] = ""
 
-    st.title("Document Signer ✒️")
-    uploaded_files = st.file_uploader("Upload Documents", type=['pdf', 'docx', 'png', 'jpg'], accept_multiple_files=True)
+st.session_state['api_key'] = st.text_input("Enter your Claude API key:", type="password")
 
-    if uploaded_files and st.session_state['api_key']:
-        for uploaded_file in uploaded_files:
-            if uploaded_file.name not in st.session_state['processed_docs']:
-                doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
-                st.session_state['doc_id_counter'] += 1
-                upload_time = datetime.now()
-                
-                analysis = analyze_with_claude(uploaded_file.name, uploaded_file.type)
-                if analysis:
-                    st.session_state['documents'].append({'id': doc_id, 'name': uploaded_file.name, 'status': 'Pending', 'upload_time': upload_time, 'analysis': analysis})
-                    st.session_state['history'].append({'date': upload_time.strftime("%Y-%m-%d %H:%M:%S"), 'id': doc_id, 'name': uploaded_file.name, 'status': f"Pending {STATUS_EMOJIS['Pending']}", 'analysis': analysis})
-                    st.session_state['processed_docs'].add(uploaded_file.name)
-                    st.success(f"{uploaded_file.name} uploaded successfully!")
-    elif uploaded_files and not st.session_state['api_key']:
-        st.warning("Please configure your API key first!")
+# Document upload logic (Streamlit allows file uploading)
+uploaded_file = st.file_uploader("Upload a document", type=["pdf", "docx", "txt"])
 
-    st.header("Document Status")
-    pending_docs = [doc for doc in st.session_state['documents'] if doc['status'] == 'Pending']
-    
-    if pending_docs:
-        for doc in pending_docs:
-            col1, col2, col3 = st.columns([3, 1, 1])
-            with col1:
-                st.write(f"📄 {doc['name']} | Status: {doc['status']} {STATUS_EMOJIS[doc['status']]}")
-                with st.expander("Show Analysis"):
-                    st.write(doc['analysis'])
-            with col2:
-                if st.button(f"Accept {doc['id']}", key=f"accept_{doc['id']}"):
-                    doc['status'] = "Authorized"
-                    st.session_state['document_removal_times'][doc['id']] = datetime.now() + timedelta(minutes=5)
-                    st.rerun()
-            with col3:
-                if st.button(f"Reject {doc['id']}", key=f"reject_{doc['id']}"):
-                    doc['status'] = "Rejected"
-                    st.session_state['document_removal_times'][doc['id']] = datetime.now() + timedelta(minutes=5)
-                    st.rerun()
-    else:
-        st.info("No pending documents")
+# Optional: Detect file type based on the file extension
+if uploaded_file:
+    file_type = uploaded_file.name.split('.')[-1]  # Get file extension
+    st.write(f"Uploaded file: {uploaded_file.name} of type {file_type}")
 
-    st.header("History of Signing")
-    if st.session_state['history']:
-        history_df = pd.DataFrame(st.session_state['history'])
-        st.dataframe(history_df.sort_values('date', ascending=False), hide_index=True)
+    # Trigger the analysis when the "Analyze" button is clicked
+    if st.button("Analyze"):
+        result = analyze_with_claude(uploaded_file.name, file_type)
+        if result:
+            st.write("Analysis Result:")
+            st.write(result)
