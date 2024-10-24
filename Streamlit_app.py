@@ -1,9 +1,7 @@
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import requests
 import json
 
@@ -28,7 +26,7 @@ STATUS_EMOJIS = {
     'Rejected': '❌'
 }
 
-def analyze_with_claude(content):
+def analyze_with_claude(filename, file_type):
     try:
         api_key = "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"
         
@@ -43,7 +41,7 @@ def analyze_with_claude(content):
             "messages": [
                 {
                     "role": "user",
-                    "content": f"Analyze this document and provide:\n1. Brief summary\n2. Names mentioned\n3. Any actions requested specifically for Kalinov Jim Rozensky DAMEUS.\n\nDocument content: {content}"
+                    "content": f"A document named {filename} of type {file_type} has been uploaded for review. Please provide:\n1. Brief acknowledgment of the document type\n2. Note to check for any mention of Kalinov Jim Rozensky DAMEUS\n3. Standard processing recommendations."
                 }
             ]
         }
@@ -60,48 +58,10 @@ def analyze_with_claude(content):
             if 'content' in result and len(result['content']) > 0:
                 return result['content'][0]['text']
         
-        st.error(f"API Error {response.status_code}: {response.text}")
-        return None
+        return "Analysis not available."
             
     except Exception as e:
-        st.error(f"Error analyzing document: {str(e)}")
-        return None
-
-def send_email(document_name, document_type, summary):
-    try:
-        sender_email = "jimkalinov@gmail.com"
-        sender_password = "Jimkali90"
-        receiver_email = "jimkalinov@gmail.com"
-        
-        msg = MIMEMultipart()
-        msg['From'] = sender_email
-        msg['To'] = receiver_email
-        msg['Subject'] = f"{document_name} from Signer - {datetime.now().strftime('%Y-%m-%d')}"
-        
-        body = f"""
-This is a summary of the document:
-
-Document Name: {document_name}
-Document Type: {document_type}
-
-Summary Analysis:
-{summary}
-
-Best regards,
-Document Signer App
-        """
-        
-        msg.attach(MIMEText(body, 'plain'))
-        
-        with smtplib.SMTP('smtp.gmail.com', 587) as server:
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-            
-        return True
-    except Exception as e:
-        st.error(f"Failed to send email: {str(e)}")
-        return False
+        return f"Analysis error: {str(e)}"
 
 def login_user(email, password):
     return email == "admin" and password == "admin123"
@@ -145,66 +105,41 @@ else:
     
     # File Upload Section
     st.header("Upload Document(s)")
-    uploaded_files = st.file_uploader("Choose files", type=['txt'], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Choose files", type=['pdf', 'docx', 'png', 'jpg'], 
+                                    accept_multiple_files=True)
 
     if uploaded_files:
         for uploaded_file in uploaded_files:
-            try:
-                # Read file content
-                content = uploaded_file.getvalue().decode('utf-8')
+            doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
+            st.session_state['doc_id_counter'] += 1
+            upload_time = datetime.now()
+            
+            # Get Claude's analysis
+            analysis = analyze_with_claude(uploaded_file.name, uploaded_file.type)
+            
+            if not any(doc['name'] == uploaded_file.name and doc['status'] == 'Pending' 
+                      for doc in st.session_state['documents']):
+                # Add to documents list
+                st.session_state['documents'].append({
+                    'id': doc_id,
+                    'name': uploaded_file.name,
+                    'status': 'Pending',
+                    'upload_time': upload_time,
+                    'analysis': analysis
+                })
                 
-                # Analyze with Claude
-                st.info(f"Analyzing {uploaded_file.name}...")
-                analysis = analyze_with_claude(content)
+                # Add to history with Pending status
+                st.session_state['history'].append({
+                    'date': upload_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    'id': doc_id,
+                    'name': uploaded_file.name,
+                    'status': f"Pending {STATUS_EMOJIS['Pending']}",
+                    'analysis': analysis
+                })
                 
-                if analysis:
-                    st.success("Analysis completed!")
-                    with st.expander(f"Show analysis for {uploaded_file.name}"):
-                        st.write(analysis)
-                    
-                    # Process document
-                    doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
-                    st.session_state['doc_id_counter'] += 1
-                    upload_time = datetime.now()
-                    
-                    # Add to documents list
-                    if not any(doc['name'] == uploaded_file.name and doc['status'] == 'Pending' 
-                              for doc in st.session_state['documents']):
-                        
-                        doc_data = {
-                            'id': doc_id,
-                            'name': uploaded_file.name,
-                            'status': 'Pending',
-                            'upload_time': upload_time,
-                            'analysis': analysis
-                        }
-                        
-                        st.session_state['documents'].append(doc_data)
-                        
-                        # Add to history
-                        st.session_state['history'].append({
-                            'date': upload_time.strftime("%Y-%m-%d %H:%M:%S"),
-                            'id': doc_id,
-                            'name': uploaded_file.name,
-                            'status': f"Pending {STATUS_EMOJIS['Pending']}",
-                            'analysis': analysis
-                        })
-                        
-                        # Try to send email
-                        try:
-                            email_sent = send_email(
-                                uploaded_file.name,
-                                'text/plain',
-                                analysis
-                            )
-                            if email_sent:
-                                st.success(f"Analysis sent to jimkalinov@gmail.com")
-                        except Exception as e:
-                            st.warning(f"Could not send email: {str(e)}")
-                
-            except Exception as e:
-                st.error(f"Error processing {uploaded_file.name}: {str(e)}")
-                continue
+                # Show analysis
+                with st.expander(f"Analysis for {uploaded_file.name}"):
+                    st.write(analysis)
                 
         st.success(f"{len(uploaded_files)} document(s) uploaded successfully!")
 
@@ -218,6 +153,8 @@ else:
             col1, col2, col3 = st.columns([3, 1, 1])
             with col1:
                 st.write(f"📄 {doc['name']} | Status: {doc['status']} {STATUS_EMOJIS[doc['status']]}")
+                with st.expander("Show Analysis"):
+                    st.write(doc.get('analysis', 'No analysis available'))
             with col2:
                 if st.button(f"Accept", key=f"accept_{doc['id']}"):
                     doc['status'] = "Authorized"
@@ -255,23 +192,41 @@ else:
                     hide_index=True)
 
     # Analytics Section
-    st.header("Analytics")
+    st.header("Analytics and Activity Tracking")
+    
     if st.session_state['history']:
         df_history = pd.DataFrame(st.session_state['history'])
         
-        # Status Distribution
+        # 1. Document Status Distribution
         st.subheader("Document Status Distribution")
         status_counts = df_history['status'].apply(lambda x: x.split()[0]).value_counts()
+        
+        # Display color legend
+        st.write("Status Colors:")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(f"🟡 Pending {STATUS_EMOJIS['Pending']}")
+        with col2:
+            st.markdown(f"🟢 Authorized {STATUS_EMOJIS['Authorized']}")
+        with col3:
+            st.markdown(f"🔴 Rejected {STATUS_EMOJIS['Rejected']}")
+            
         st.bar_chart(status_counts)
         
-        # Time Analysis
+        # 2. Time Analysis
+        st.subheader("Processing Time Analysis")
         if st.session_state['action_times']:
-            st.subheader("Processing Time Analysis")
             time_diffs = [(action - upload).total_seconds() 
                          for upload, action in st.session_state['action_times']]
             avg_time = sum(time_diffs) / len(time_diffs)
-            st.metric("Average Processing Time", f"{avg_time:.1f} seconds")
+            
+            time_data = pd.DataFrame({
+                'Document': range(1, len(time_diffs) + 1),
+                'Time (seconds)': time_diffs
+            })
+            st.line_chart(time_data.set_index('Document'))
+            st.metric("Average Time to Sign", f"{avg_time:.1f} seconds")
 
-        # Document Volume
+        # 3. Document Volume
         st.subheader("Total Documents")
         st.metric("Total Documents Processed", len(st.session_state['history']))
