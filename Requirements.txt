@@ -1,5 +1,2 @@
 streamlit
 requests
-PyPDF2
-python-docx
-pandas
