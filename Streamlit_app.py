@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Page config
 st.set_page_config(
@@ -22,7 +21,6 @@ if 'doc_id_counter' not in st.session_state:
 
 # Authentication function
 def login_user(username, password):
-    # Demo credentials - you can modify these
     return username == "admin" and password == "admin123"
 
 # Main layout
@@ -89,7 +87,6 @@ else:
     elif st.session_state['page'] == 'status':
         st.header("Document Status")
         
-        # Show pending documents
         pending_docs = [doc for doc in st.session_state['documents'] if doc['status'] == 'Pending']
         
         if not pending_docs:
@@ -130,14 +127,14 @@ else:
             # Create DataFrame for analysis
             df = pd.DataFrame(st.session_state['history'])
             
-            # Document status counts
-            status_counts = df['action'].value_counts()
-            
-            # Create pie chart
-            fig, ax = plt.subplots()
-            ax.pie(status_counts, labels=status_counts.index, autopct='%1.1f%%')
-            ax.set_title('Document Status Distribution')
-            st.pyplot(fig)
+            # Show summary metrics
+            col1, col2 = st.columns(2)
+            with col1:
+                accepted = len(df[df['action'] == 'Accepted'])
+                st.metric("Documents Accepted", accepted)
+            with col2:
+                rejected = len(df[df['action'] == 'Rejected'])
+                st.metric("Documents Rejected", rejected)
             
             # Show history table
             st.subheader("Recent Activity")
