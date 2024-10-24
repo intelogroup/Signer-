@@ -26,20 +26,23 @@ def logout():
         del st.session_state['logged_in']
         del st.session_state['email']
 
-# User login
+# Initialize session state for login
 if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
+
+# User login
+if not st.session_state['logged_in']:
     # User login form
     st.subheader("Login to access")
-    
+
     email = st.text_input("Email")
     password = st.text_input("Password", type="password")
-    
+
     if st.button("Login"):
         if login_user(email, password):
             st.session_state['logged_in'] = True
             st.session_state['email'] = email
             st.success("Login successful!")
-            st.experimental_rerun()
         else:
             st.error("Invalid email or password")
 
@@ -48,7 +51,7 @@ else:
     if st.button("Logout"):
         logout()
         st.success("Logged out successfully!")
-        st.experimental_rerun()
+        st.stop()  # Stop the app execution to refresh the login state
 
     # Main app logic once logged in
     st.header(f"Welcome, {st.session_state['email']}!")
@@ -67,17 +70,17 @@ else:
     if uploaded_file is not None:
         # Save the uploaded file to the uploads directory
         file_path = os.path.join(UPLOAD_FOLDER, uploaded_file.name)
-        
+
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
-        
+
         st.success(f"File '{uploaded_file.name}' uploaded successfully!")
         st.write(f"File saved to: {file_path}")
-        
+
         # If it's an image, display the preview
         if uploaded_file.type.startswith('image/'):
             st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
-        
+
         # Admin: Review and Approve
         st.header("Admin Review")
         approve = st.button("Approve and Apply Stamp")
