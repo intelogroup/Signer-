@@ -1,6 +1,7 @@
 import streamlit as st
 from datetime import datetime, timedelta
 import time
+import threading
 
 # Initialize session state for login, documents, history, etc.
 if 'logged_in' not in st.session_state:
@@ -11,6 +12,9 @@ if 'documents' not in st.session_state:
 
 if 'history' not in st.session_state:
     st.session_state['history'] = []
+
+if 'doc_id_counter' not in st.session_state:
+    st.session_state['doc_id_counter'] = 1
 
 # Authentication function
 def login_user(email, password):
@@ -23,10 +27,11 @@ def login_user(email, password):
 def logout():
     st.session_state['logged_in'] = False
 
-# Function to handle document expiration
+# Function to handle document expiration after 1 minute
 def expire_document(doc_id):
     time.sleep(60)  # Wait 1 minute before expiring document
     st.session_state['documents'] = [doc for doc in st.session_state['documents'] if doc['ID'] != doc_id]
+    st.experimental_rerun()  # Manually refresh to remove document
 
 # Profile menu
 def profile_menu():
@@ -61,9 +66,8 @@ else:
         profile_menu()
 
     # Hero Section
-    st.title("Signer")
+    st.title("Signer ✒️")
     st.write("A solution for traveling managers")
-    st.image("https://img.icons8.com/external-flat-juicy-fish/64/ffffff/external-stamp-marketing-flat-flat-juicy-fish.png", width=120)
 
     # File Upload Section (multiple file uploads)
     st.header("Upload Document(s)")
@@ -72,7 +76,8 @@ else:
     if uploaded_files:
         for uploaded_file in uploaded_files:
             # Generate document ID and date
-            doc_id = f"signer{len(st.session_state['documents']) + 1:03}"
+            doc_id = f"signer{st.session_state['doc_id_counter']:03}"
+            st.session_state['doc_id_counter'] += 1
             date_time = datetime.now().strftime("%Y%m%d%H%M%S")
 
             # Add document to the list
@@ -100,10 +105,9 @@ else:
                         'Document Name': doc['Document Name'],
                         'Status': doc['Status']
                     })
-                    st.success(f"Document {doc['Document Name']} has been authorized.")
+                    # Start the timer for document expiration in a new thread
+                    threading.Thread(target=expire_document, args=(doc['ID'],)).start()
                     st.experimental_rerun()
-                    # Start the timer for document expiration
-                    st.session_state['timer'] = expire_document(doc['ID'])
 
             with col2:
                 if st.button(f"Reject {doc['ID']}"):
@@ -114,10 +118,9 @@ else:
                         'Document Name': doc['Document Name'],
                         'Status': doc['Status']
                     })
-                    st.error(f"Document {doc['Document Name']} has been rejected.")
+                    # Start the timer for document expiration in a new thread
+                    threading.Thread(target=expire_document, args=(doc['ID'],)).start()
                     st.experimental_rerun()
-                    # Start the timer for document expiration
-                    st.session_state['timer'] = expire_document(doc['ID'])
 
     # History of Signing Section
     st.header("History of Signing")
