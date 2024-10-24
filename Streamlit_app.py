@@ -1,53 +1,8 @@
 import streamlit as st
 import requests
-import PyPDF2
-import docx
-import io
-import pandas as pd
 
 # Get API key from Streamlit secrets
 CLAUDE_API_KEY = st.secrets["CLAUDE_API_KEY"]
-
-def extract_text_from_pdf(file_bytes):
-    try:
-        pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-        text = []
-        for page in pdf_reader.pages:
-            text.append(page.extract_text())
-        return '\n'.join(text)
-    except Exception as e:
-        st.error(f"Error reading PDF: {str(e)}")
-        return None
-
-def extract_text_from_docx(file_bytes):
-    try:
-        doc = docx.Document(io.BytesIO(file_bytes))
-        text = []
-        for paragraph in doc.paragraphs:
-            text.append(paragraph.text)
-        return '\n'.join(text)
-    except Exception as e:
-        st.error(f"Error reading DOCX: {str(e)}")
-        return None
-
-def extract_text_from_file(uploaded_file):
-    try:
-        # Get the file bytes
-        file_bytes = uploaded_file.getvalue()
-        
-        # Extract text based on file type
-        if uploaded_file.type == "application/pdf":
-            return extract_text_from_pdf(file_bytes)
-        elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            return extract_text_from_docx(file_bytes)
-        elif uploaded_file.type == "text/plain":
-            return file_bytes.decode('utf-8')
-        else:
-            st.error(f"Unsupported file type: {uploaded_file.type}")
-            return None
-    except Exception as e:
-        st.error(f"Error extracting text: {str(e)}")
-        return None
 
 def analyze_with_claude(text, filename):
     try:
@@ -97,32 +52,25 @@ Document content to analyze:
         return None
 
 def main():
-    st.title("Multi-Document Content Analyzer 📄")
+    st.title("Multi-Document Text Analyzer 📄")
     
     # Initialize session state for analyses
     if 'analyses' not in st.session_state:
         st.session_state['analyses'] = {}
     
-    # File upload - now accepts multiple files
+    # File upload - multiple text files
     uploaded_files = st.file_uploader(
-        "Upload documents", 
-        type=['txt', 'pdf', 'docx'], 
+        "Upload text documents", 
+        type=['txt'], 
         accept_multiple_files=True
     )
     
     if uploaded_files:
-        # Create a container for the progress bar
-        progress_container = st.empty()
-        
         # Process each file
-        for i, uploaded_file in enumerate(uploaded_files):
-            # Update progress
-            progress = (i + 1) / len(uploaded_files)
-            progress_container.progress(progress, f"Processing {uploaded_file.name}")
-            
+        for uploaded_file in uploaded_files:
             try:
-                # Extract text content
-                text_content = extract_text_from_file(uploaded_file)
+                # Read text content
+                text_content = uploaded_file.getvalue().decode('utf-8')
                 
                 if text_content and text_content.strip():
                     # Create an expander for each document
@@ -153,13 +101,10 @@ def main():
                                     with tab2:
                                         st.text_area("Full Analysis", analysis, height=200)
                 else:
-                    st.error(f"❌ Could not extract text from {uploaded_file.name}")
+                    st.error(f"❌ The file {uploaded_file.name} is empty")
                     
             except Exception as e:
                 st.error(f"❌ Error processing {uploaded_file.name}: {str(e)}")
-        
-        # Clear progress bar after completion
-        progress_container.empty()
     
     # View saved analyses
     if st.session_state['analyses']:
