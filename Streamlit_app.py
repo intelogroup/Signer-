@@ -3,7 +3,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 import requests
 import json
-import io
 
 # Initialize session state
 if 'logged_in' not in st.session_state:
@@ -21,7 +20,7 @@ if 'action_times' not in st.session_state:
 if 'api_key' not in st.session_state:
     st.session_state['api_key'] = None
 if 'processed_docs' not in st.session_state:
-    st.session_state['processed_docs'] = set()
+    st.session_state['processed_docs'] = set()  # To track processed documents
 
 # Status emojis
 STATUS_EMOJIS = {
@@ -30,15 +29,7 @@ STATUS_EMOJIS = {
     'Rejected': '❌'
 }
 
-def extract_text_from_file(uploaded_file):
-    """Extract text from text files."""
-    try:
-        return uploaded_file.getvalue().decode('utf-8')
-    except Exception as e:
-        st.error(f"Error extracting text from {uploaded_file.name}: {str(e)}")
-        return None
-
-def analyze_with_claude(content):
+def analyze_with_claude(filename, file_type):
     try:
         if not st.session_state['api_key']:
             st.error("Please enter your Claude API key first")
@@ -55,7 +46,7 @@ def analyze_with_claude(content):
             "messages": [
                 {
                     "role": "user",
-                    "content": f"Please analyze this document content and provide:\n1. Brief summary\n2. Names mentioned\n3. Any actions requested specifically for Kalinov Jim Rozensky DAMEUS\n\nDocument content: {content}"
+                    "content": f"A document named {filename} of type {file_type} has been uploaded for review. Please provide:\n1. Brief acknowledgment of the document type\n2. Note to check for any mention of Kalinov Jim Rozensky DAMEUS\n3. Standard processing recommendations."
                 }
             ]
         }
@@ -104,17 +95,12 @@ if not st.session_state['logged_in']:
 else:
     check_expired_items()
 
-    # API Key Configuration at the top after login
-    st.markdown("### Claude API Configuration")
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        api_key = st.text_input("Enter Claude API Key", type="password")
-    with col2:
-        if st.button("Save API Key"):
-            st.session_state['api_key'] = api_key
-            st.success("API Key saved!")
-    
-    st.divider()
+    # API Key Configuration
+    st.sidebar.title("Configuration")
+    api_key = st.sidebar.text_input("Enter Claude API Key", type="password")
+    if st.sidebar.button("Save API Key"):
+        st.session_state['api_key'] = api_key
+        st.sidebar.success("API Key saved!")
 
     # Profile dropdown in header
     col1, col2 = st.columns([0.9, 0.1])
@@ -134,62 +120,49 @@ else:
     
     # File Upload Section
     st.header("Upload Document(s)")
-    uploaded_files = st.file_uploader("Choose text files", 
-                                    type=['txt'], 
+    uploaded_files = st.file_uploader("Choose files", type=['pdf', 'docx', 'png', 'jpg'], 
                                     accept_multiple_files=True)
 
     if uploaded_files and st.session_state['api_key']:
         for uploaded_file in uploaded_files:
             # Check if document has already been processed
             if uploaded_file.name not in st.session_state['processed_docs']:
-                st.info(f"Processing {uploaded_file.name}...")
+                doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
+                st.session_state['doc_id_counter'] += 1
+                upload_time = datetime.now()
                 
-                # Extract text from document
-                extracted_text = extract_text_from_file(uploaded_file)
+                # Get Claude's analysis
+                analysis = analyze_with_claude(uploaded_file.name, uploaded_file.type)
                 
-                if extracted_text:
-                    # Get Claude's analysis
-                    analysis = analyze_with_claude(extracted_text)
+                if analysis:
+                    # Add to documents list
+                    st.session_state['documents'].append({
+                        'id': doc_id,
+                        'name': uploaded_file.name,
+                        'status': 'Pending',
+                        'upload_time': upload_time,
+                        'analysis': analysis
+                    })
                     
-                    if analysis:
-                        doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
-                        st.session_state['doc_id_counter'] += 1
-                        upload_time = datetime.now()
-                        
-                        # Add to documents list
-                        doc_data = {
-                            'id': doc_id,
-                            'name': uploaded_file.name,
-                            'status': 'Pending',
-                            'upload_time': upload_time,
-                            'content': extracted_text,
-                            'analysis': analysis
-                        }
-                        
-                        st.session_state['documents'].append(doc_data)
-                        
-                        # Add to history
-                        st.session_state['history'].append({
-                            'date': upload_time.strftime("%Y-%m-%d %H:%M:%S"),
-                            'id': doc_id,
-                            'name': uploaded_file.name,
-                            'status': f"Pending {STATUS_EMOJIS['Pending']}",
-                            'analysis': analysis
-                        })
-                        
-                        # Mark document as processed
-                        st.session_state['processed_docs'].add(uploaded_file.name)
-                        
-                        # Show analysis
-                        with st.expander(f"Analysis for {uploaded_file.name}"):
-                            st.write("Extracted Text:")
-                            st.text(extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text)
-                            st.write("\nAnalysis:")
-                            st.write(analysis)
+                    # Add to history with Pending status
+                    st.session_state['history'].append({
+                        'date': upload_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        'id': doc_id,
+                        'name': uploaded_file.name,
+                        'status': f"Pending {STATUS_EMOJIS['Pending']}",
+                        'analysis': analysis
+                    })
+                    
+                    # Mark document as processed
+                    st.session_state['processed_docs'].add(uploaded_file.name)
+                    
+                    # Show analysis
+                    with st.expander(f"Analysis for {uploaded_file.name}"):
+                        st.write(analysis)
                 
-        st.success(f"{len(uploaded_files)} document(s) processed successfully!")
+        st.success(f"{len(uploaded_files)} document(s) uploaded successfully!")
     elif uploaded_files and not st.session_state['api_key']:
-        st.warning("Please configure your Claude API key first")
+        st.warning("Please configure your Claude API key in the sidebar first")
 
     # Document Status Section
     st.header("Document Status")
@@ -202,8 +175,8 @@ else:
             col1, col2, col3 = st.columns([3, 1, 1])
             with col1:
                 st.write(f"📄 {doc['name']} | Status: {doc['status']} {STATUS_EMOJIS[doc['status']]}")
-                with st.expander("Show Details"):
-                    st.write("Analysis:", doc.get('analysis', 'No analysis available'))
+                with st.expander("Show Analysis"):
+                    st.write(doc.get('analysis', 'No analysis available'))
             with col2:
                 if st.button(f"Accept", key=f"accept_{doc['id']}"):
                     doc['status'] = "Authorized"
@@ -241,7 +214,8 @@ else:
                     hide_index=True)
 
     # Analytics Section
-    st.header("Analytics")
+    st.header("Analytics and Activity Tracking")
+    
     if st.session_state['history']:
         df_history = pd.DataFrame(st.session_state['history'])
         
@@ -273,7 +247,7 @@ else:
                 'Time (seconds)': time_diffs
             })
             st.line_chart(time_data.set_index('Document'))
-            st.metric("Average Processing Time", f"{avg_time:.1f} seconds")
+            st.metric("Average Time to Sign", f"{avg_time:.1f} seconds")
 
         # Document Volume
         st.subheader("Total Documents")
