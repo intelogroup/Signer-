@@ -13,8 +13,6 @@ if 'doc_id_counter' not in st.session_state:
     st.session_state['doc_id_counter'] = 1
 if 'document_removal_times' not in st.session_state:
     st.session_state['document_removal_times'] = {}
-if 'feed_removal_times' not in st.session_state:
-    st.session_state['feed_removal_times'] = {}
 if 'action_times' not in st.session_state:
     st.session_state['action_times'] = []
 
@@ -31,19 +29,12 @@ def login_user(email, password):
 def check_expired_items():
     current_time = datetime.now()
     
-    # Check documents that should be removed after action (1 minute)
+    # Check documents that should be removed after action (5 minutes)
     for doc_id, expiration_time in list(st.session_state['document_removal_times'].items()):
         if current_time > expiration_time:
             st.session_state['documents'] = [doc for doc in st.session_state['documents'] 
                                            if doc['id'] != doc_id]
             del st.session_state['document_removal_times'][doc_id]
-    
-    # Check feed items that should be removed after 5 minutes
-    for doc_id, upload_time in list(st.session_state['feed_removal_times'].items()):
-        if current_time > upload_time + timedelta(minutes=5):
-            st.session_state['documents'] = [doc for doc in st.session_state['documents'] 
-                                           if doc['id'] != doc_id or doc['status'] != 'Pending']
-            del st.session_state['feed_removal_times'][doc_id]
 
 if not st.session_state['logged_in']:
     st.title("Document Signer 📝")
@@ -86,7 +77,6 @@ else:
             st.session_state['doc_id_counter'] += 1
             upload_time = datetime.now()
             
-            # Add document to both documents list and history
             if not any(doc['name'] == uploaded_file.name and doc['status'] == 'Pending' 
                       for doc in st.session_state['documents']):
                 # Add to documents list
@@ -105,16 +95,12 @@ else:
                     'status': f"Pending {STATUS_EMOJIS['Pending']}"
                 })
                 
-                # Set 5-minute timer for feed removal
-                st.session_state['feed_removal_times'][doc_id] = upload_time
-                
         st.success(f"{len(uploaded_files)} document(s) uploaded successfully!")
 
     # Document Status Section
     st.header("Document Status")
     pending_docs = [doc for doc in st.session_state['documents'] 
-                   if doc['status'] == 'Pending' and 
-                   doc['id'] not in st.session_state['document_removal_times']]
+                   if doc['status'] == 'Pending']
     
     if pending_docs:
         for doc in pending_docs:
@@ -133,7 +119,7 @@ else:
                             hist_doc['date'] = action_time.strftime("%Y-%m-%d %H:%M:%S")
                     
                     st.session_state['action_times'].append((doc['upload_time'], action_time))
-                    st.session_state['document_removal_times'][doc['id']] = datetime.now() + timedelta(minutes=1)
+                    st.session_state['document_removal_times'][doc['id']] = datetime.now() + timedelta(minutes=5)
                     st.rerun()
             with col3:
                 if st.button(f"Reject", key=f"reject_{doc['id']}"):
@@ -147,7 +133,7 @@ else:
                             hist_doc['date'] = action_time.strftime("%Y-%m-%d %H:%M:%S")
                     
                     st.session_state['action_times'].append((doc['upload_time'], action_time))
-                    st.session_state['document_removal_times'][doc['id']] = datetime.now() + timedelta(minutes=1)
+                    st.session_state['document_removal_times'][doc['id']] = datetime.now() + timedelta(minutes=5)
                     st.rerun()
     else:
         st.info("No pending documents")
@@ -178,16 +164,14 @@ else:
         })
         
         # Display color legend
+        st.write("Status Colors:")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.color_picker('Pending', '#FFA500', disabled=True)
-            st.write(f"Pending {STATUS_EMOJIS['Pending']}")
+            st.markdown(f"🟡 Pending {STATUS_EMOJIS['Pending']}")
         with col2:
-            st.color_picker('Authorized', '#32CD32', disabled=True)
-            st.write(f"Authorized {STATUS_EMOJIS['Authorized']}")
+            st.markdown(f"🟢 Authorized {STATUS_EMOJIS['Authorized']}")
         with col3:
-            st.color_picker('Rejected', '#DC143C', disabled=True)
-            st.write(f"Rejected {STATUS_EMOJIS['Rejected']}")
+            st.markdown(f"🔴 Rejected {STATUS_EMOJIS['Rejected']}")
             
         st.bar_chart(chart_data.set_index('Status'))
         
@@ -210,4 +194,4 @@ else:
         total_docs = len(st.session_state['history'])
         daily_docs = df_history.groupby(df_history['date'].str[:10]).size()
         st.line_chart(daily_docs)
-        st.metric("Total Documents Processed", total_docs
+        st.metric("Total Documents Processed", total_docs)
