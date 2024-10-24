@@ -1,25 +1,8 @@
 import streamlit as st
 import requests
-import docx
-import PyPDF2
-import io
 
 # Get API key from Streamlit secrets
 CLAUDE_API_KEY = st.secrets["CLAUDE_API_KEY"]
-
-def extract_text_from_docx(file_bytes):
-    doc = docx.Document(io.BytesIO(file_bytes))
-    text = []
-    for paragraph in doc.paragraphs:
-        text.append(paragraph.text)
-    return '\n'.join(text)
-
-def extract_text_from_pdf(file_bytes):
-    pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-    text = []
-    for page in pdf_reader.pages:
-        text.append(page.extract_text())
-    return '\n'.join(text)
 
 def analyze_with_claude(text):
     try:
@@ -56,35 +39,42 @@ def analyze_with_claude(text):
 def main():
     st.title("Document Content Analyzer 📄")
     
-    uploaded_file = st.file_uploader("Upload a document", type=['pdf', 'docx'])
+    # File upload
+    uploaded_file = st.file_uploader("Upload a text file", type=['txt'])
     
     if uploaded_file:
         st.write("Analyzing document:", uploaded_file.name)
         
-        # Extract text based on file type
         try:
-            file_bytes = uploaded_file.read()
-            if uploaded_file.type == "application/pdf":
-                text = extract_text_from_pdf(file_bytes)
-            else:  # docx
-                text = extract_text_from_docx(file_bytes)
+            # Read text content
+            text_content = uploaded_file.getvalue().decode('utf-8')
             
-            if text.strip():
+            if text_content.strip():
+                # Show text content in expander
+                with st.expander("View Document Content"):
+                    st.text(text_content)
+                
                 # Get analysis from Claude
                 with st.spinner("Getting analysis from Claude..."):
-                    analysis = analyze_with_claude(text)
+                    analysis = analyze_with_claude(text_content)
                     if analysis:
                         st.subheader("Analysis Results")
                         st.write(analysis)
                         
-                        # Show extracted text in expander
-                        with st.expander("View Extracted Text"):
-                            st.text(text)
+                        # Option to save analysis
+                        if st.button("Save Analysis"):
+                            st.session_state['last_analysis'] = analysis
+                            st.success("Analysis saved!")
             else:
-                st.error("No text could be extracted from the document")
+                st.error("The uploaded file is empty")
                 
         except Exception as e:
             st.error(f"Error processing document: {str(e)}")
+    
+    # Display saved analysis if it exists
+    if 'last_analysis' in st.session_state:
+        with st.expander("View Last Saved Analysis"):
+            st.write(st.session_state['last_analysis'])
 
 if __name__ == "__main__":
     main()
