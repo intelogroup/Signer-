@@ -1,7 +1,5 @@
 import streamlit as st
 from datetime import datetime, timedelta
-import time
-import threading
 
 # Initialize session state for login, documents, history, etc.
 if 'logged_in' not in st.session_state:
@@ -16,6 +14,9 @@ if 'history' not in st.session_state:
 if 'doc_id_counter' not in st.session_state:
     st.session_state['doc_id_counter'] = 1
 
+if 'document_removal_times' not in st.session_state:
+    st.session_state['document_removal_times'] = {}
+
 # Authentication function
 def login_user(email, password):
     users = {"admin@example.com": "admin123", "assistant@example.com": "assist456"}
@@ -28,10 +29,12 @@ def logout():
     st.session_state['logged_in'] = False
 
 # Function to handle document expiration after 1 minute
-def expire_document(doc_id):
-    time.sleep(60)  # Wait 1 minute before expiring document
-    st.session_state['documents'] = [doc for doc in st.session_state['documents'] if doc['ID'] != doc_id]
-    st.experimental_rerun()  # Manually refresh to remove document
+def check_expired_documents():
+    current_time = datetime.now()
+    for doc_id, expiration_time in list(st.session_state['document_removal_times'].items()):
+        if current_time > expiration_time:
+            st.session_state['documents'] = [doc for doc in st.session_state['documents'] if doc['ID'] != doc_id]
+            del st.session_state['document_removal_times'][doc_id]
 
 # Profile menu
 def profile_menu():
@@ -60,6 +63,9 @@ if not st.session_state['logged_in']:
         else:
             st.error("Invalid email or password")
 else:
+    # Check and remove expired documents
+    check_expired_documents()
+
     # Persona Icon (profile dropdown)
     st.markdown("<span class='persona-icon'>👤</span>", unsafe_allow_html=True)
     if st.button("Show Profile Menu"):
@@ -105,9 +111,8 @@ else:
                         'Document Name': doc['Document Name'],
                         'Status': doc['Status']
                     })
-                    # Start the timer for document expiration in a new thread
-                    threading.Thread(target=expire_document, args=(doc['ID'],)).start()
-                    st.experimental_rerun()
+                    # Set a timer for document removal (1 minute from now)
+                    st.session_state['document_removal_times'][doc['ID']] = datetime.now() + timedelta(seconds=60)
 
             with col2:
                 if st.button(f"Reject {doc['ID']}"):
@@ -118,9 +123,8 @@ else:
                         'Document Name': doc['Document Name'],
                         'Status': doc['Status']
                     })
-                    # Start the timer for document expiration in a new thread
-                    threading.Thread(target=expire_document, args=(doc['ID'],)).start()
-                    st.experimental_rerun()
+                    # Set a timer for document removal (1 minute from now)
+                    st.session_state['document_removal_times'][doc['ID']] = datetime.now() + timedelta(seconds=60)
 
     # History of Signing Section
     st.header("History of Signing")
