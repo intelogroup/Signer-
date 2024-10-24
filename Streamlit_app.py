@@ -14,7 +14,7 @@ if 'doc_id_counter' not in st.session_state:
 if 'document_removal_times' not in st.session_state:
     st.session_state['document_removal_times'] = {}
 if 'action_times' not in st.session_state:
-    st.session_state['action_times'] = []  # To store (upload_time, action_time) pairs
+    st.session_state['action_times'] = []
 
 def login_user(email, password):
     return email == "admin" and password == "admin123"
@@ -23,7 +23,7 @@ def check_expired_documents():
     current_time = datetime.now()
     for doc_id, expiration_time in list(st.session_state['document_removal_times'].items()):
         if current_time > expiration_time:
-            # Remove document from display list
+            # Remove document from display list but keep in history
             st.session_state['documents'] = [doc for doc in st.session_state['documents'] 
                                            if doc['id'] != doc_id]
             del st.session_state['document_removal_times'][doc_id]
@@ -69,17 +69,21 @@ else:
             st.session_state['doc_id_counter'] += 1
             upload_time = datetime.now()
             
-            st.session_state['documents'].append({
-                'id': doc_id,
-                'name': uploaded_file.name,
-                'status': 'Pending',
-                'upload_time': upload_time
-            })
+            # Only add if not already in documents list
+            if not any(doc['name'] == uploaded_file.name and doc['status'] == 'Pending' 
+                      for doc in st.session_state['documents']):
+                st.session_state['documents'].append({
+                    'id': doc_id,
+                    'name': uploaded_file.name,
+                    'status': 'Pending',
+                    'upload_time': upload_time
+                })
         st.success(f"{len(uploaded_files)} document(s) uploaded successfully!")
 
     # Document Status Section
     st.header("Document Status")
-    pending_docs = [doc for doc in st.session_state['documents'] if doc['status'] == 'Pending']
+    pending_docs = [doc for doc in st.session_state['documents'] 
+                   if doc['status'] == 'Pending' and doc['id'] not in st.session_state['document_removal_times']]
     
     if pending_docs:
         for doc in pending_docs:
@@ -96,11 +100,7 @@ else:
                         'name': doc['name'],
                         'status': 'Authorized'
                     })
-                    # Store action time for analytics
-                    st.session_state['action_times'].append(
-                        (doc['upload_time'], action_time)
-                    )
-                    # Set document to expire in 1 minute
+                    st.session_state['action_times'].append((doc['upload_time'], action_time))
                     st.session_state['document_removal_times'][doc['id']] = datetime.now() + timedelta(minutes=1)
                     st.rerun()
             with col3:
@@ -113,11 +113,7 @@ else:
                         'name': doc['name'],
                         'status': 'Rejected'
                     })
-                    # Store action time for analytics
-                    st.session_state['action_times'].append(
-                        (doc['upload_time'], action_time)
-                    )
-                    # Set document to expire in 1 minute
+                    st.session_state['action_times'].append((doc['upload_time'], action_time))
                     st.session_state['document_removal_times'][doc['id']] = datetime.now() + timedelta(minutes=1)
                     st.rerun()
     else:
@@ -130,27 +126,35 @@ else:
         st.dataframe(history_df.sort_values('date', ascending=False),
                     hide_index=True)
 
-    # Analytics Section
+    # Analytics Section with Graphs
     st.header("Analytics and Activity Tracking")
     
     if st.session_state['history']:
-        # Analytics 1: Document Status Distribution
         df_history = pd.DataFrame(st.session_state['history'])
-        col1, col2 = st.columns(2)
-        with col1:
-            authorized_count = len(df_history[df_history['status'] == 'Authorized'])
-            st.metric("Documents Authorized", authorized_count)
-        with col2:
-            rejected_count = len(df_history[df_history['status'] == 'Rejected'])
-            st.metric("Documents Rejected", rejected_count)
-
-        # Analytics 2: Average Time to Sign
+        
+        # 1. Document Status Distribution Graph
+        st.subheader("Document Status Distribution")
+        status_counts = df_history['status'].value_counts()
+        st.bar_chart(status_counts)
+        
+        # 2. Time to Sign Analysis
+        st.subheader("Signing Time Analysis")
         if st.session_state['action_times']:
             time_diffs = [(action - upload).total_seconds() 
                          for upload, action in st.session_state['action_times']]
             avg_time = sum(time_diffs) / len(time_diffs)
+            
+            # Create time series data for visualization
+            time_data = pd.DataFrame({
+                'Document': range(1, len(time_diffs) + 1),
+                'Time (seconds)': time_diffs
+            })
+            st.line_chart(time_data.set_index('Document'))
             st.metric("Average Time to Sign", f"{avg_time:.1f} seconds")
 
-        # Analytics 3: Total Documents Summary
+        # 3. Document Volume Metrics
+        st.subheader("Document Volume")
         total_docs = len(st.session_state['history'])
+        daily_docs = df_history.groupby(df_history['date'].str[:10]).size()
+        st.line_chart(daily_docs)
         st.metric("Total Documents Processed", total_docs)
