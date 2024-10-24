@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import requests
+from anthropic import Anthropic
 
 # Initialize session state
 if 'logged_in' not in st.session_state:
@@ -25,6 +26,7 @@ def analyze_with_claude(filename):
 
         headers = {
             "x-api-key": st.session_state['api_key'],
+            "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
         
@@ -33,13 +35,20 @@ def analyze_with_claude(filename):
             "messages": [
                 {"role": "user", "content": f"Analyze document {filename}. Focus on key names like Kalinov Jim Rozensky DAMEUS. Limit response to 200 tokens."}
             ],
-            "max_tokens_to_sample": 200  # Limit to 200 tokens
+            "max_tokens": 200  # Changed from max_tokens_to_sample to max_tokens
         }
         
-        response = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=data, timeout=30)
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json=data,
+            timeout=30
+        )
+        
         if response.status_code == 200:
             result = response.json()
-            return result['completion']
+            # Updated to match the new API response structure
+            return result['content'][0]['text']
         else:
             st.error(f"API Error {response.status_code}: {response.text}")
             return None
@@ -58,51 +67,71 @@ def check_expired_items():
             st.session_state['documents'] = [doc for doc in st.session_state['documents'] if doc['id'] != doc_id]
             del st.session_state['document_removal_times'][doc_id]
 
-# Authentication
-if not st.session_state['logged_in']:
-    st.title("Document Signer 📝")
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if login_user(email, password):
-            st.session_state['logged_in'] = True
-            st.success("Login successful!")
-            st.rerun()
-        else:
-            st.error("Invalid email or password")
-else:
-    # API Key
-    st.sidebar.title("Configuration")
-    api_key = st.sidebar.text_input("Enter Claude API Key", type="password")
-    if st.sidebar.button("Save API Key"):
-        st.session_state['api_key'] = api_key
-        st.sidebar.success("API Key saved!")
-
-    # Document Upload and Analysis
-    st.title("Document Signer ✒️")
-    uploaded_files = st.file_uploader("Upload Document(s)", type=['pdf', 'docx'], accept_multiple_files=True)
-    
-    if uploaded_files and st.session_state['api_key']:
-        for uploaded_file in uploaded_files:
-            doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
-            st.session_state['doc_id_counter'] += 1
-            upload_time = datetime.now()
-
-            # Claude Analysis
-            analysis = analyze_with_claude(uploaded_file.name)
-            if analysis:
-                st.session_state['documents'].append({'id': doc_id, 'name': uploaded_file.name, 'status': 'Pending', 'analysis': analysis})
-                st.session_state['document_removal_times'][doc_id] = upload_time + timedelta(minutes=5)
-                with st.expander(f"Analysis for {uploaded_file.name}"):
-                    st.write(analysis)
-
-    # Display Documents
-    st.header("Document Status")
-    for doc in st.session_state['documents']:
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.write(f"{doc['name']} | {doc['status']} {STATUS_EMOJIS[doc['status']]}")
-        with col2:
-            if st.button(f"Authorize {doc['id']}", key=f"auth_{doc['id']}"):
-                doc['status'] = 'Authorized'
+# Main app
+def main():
+    # Authentication
+    if not st.session_state['logged_in']:
+        st.title("Document Signer 📝")
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+        if st.button("Login"):
+            if login_user(email, password):
+                st.session_state['logged_in'] = True
+                st.success("Login successful!")
                 st.rerun()
+            else:
+                st.error("Invalid email or password")
+    else:
+        # API Key
+        st.sidebar.title("Configuration")
+        api_key = st.sidebar.text_input("Enter Claude API Key", type="password")
+        if st.sidebar.button("Save API Key"):
+            st.session_state['api_key'] = api_key
+            st.sidebar.success("API Key saved!")
+
+        # Document Upload and Analysis
+        st.title("Document Signer ✒️")
+        uploaded_files = st.file_uploader("Upload Document(s)", type=['pdf', 'docx'], accept_multiple_files=True)
+        
+        if uploaded_files and st.session_state['api_key']:
+            for uploaded_file in uploaded_files:
+                doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
+                st.session_state['doc_id_counter'] += 1
+                upload_time = datetime.now()
+
+                # Claude Analysis
+                analysis = analyze_with_claude(uploaded_file.name)
+                if analysis:
+                    st.session_state['documents'].append({
+                        'id': doc_id,
+                        'name': uploaded_file.name,
+                        'status': 'Pending',
+                        'analysis': analysis
+                    })
+                    st.session_state['document_removal_times'][doc_id] = upload_time + timedelta(minutes=5)
+                    with st.expander(f"Analysis for {uploaded_file.name}"):
+                        st.write(analysis)
+
+        # Display Documents
+        st.header("Document Status")
+        check_expired_items()  # Check for expired documents
+        
+        for doc in st.session_state['documents']:
+            col1, col2, col3 = st.columns([3, 1, 1])
+            with col1:
+                st.write(f"{doc['name']} | {doc['status']} {STATUS_EMOJIS[doc['status']]}")
+            with col2:
+                if st.button(f"Authorize {doc['id']}", key=f"auth_{doc['id']}"):
+                    doc['status'] = 'Authorized'
+                    st.rerun()
+            with col3:
+                if st.button(f"Reject {doc['id']}", key=f"reject_{doc['id']}"):
+                    doc['status'] = 'Rejected'
+                    st.rerun()
+
+        if st.sidebar.button("Logout"):
+            st.session_state['logged_in'] = False
+            st.rerun()
+
+if __name__ == "__main__":
+    main()
