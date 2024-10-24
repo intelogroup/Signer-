@@ -1,4 +1,14 @@
+# I'll modify the code to add an API key input field after login and fix the document reappearing issue.
 
+#📋 **requirements.txt** (Click to copy):
+#```text
+#streamlit==1.39.0
+#pandas==2.2.3
+#requests==2.32.3
+```
+
+#📋 **Streamlit_app.py** (Click to copy):
+#```python
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -18,6 +28,10 @@ if 'document_removal_times' not in st.session_state:
     st.session_state['document_removal_times'] = {}
 if 'action_times' not in st.session_state:
     st.session_state['action_times'] = []
+if 'api_key' not in st.session_state:
+    st.session_state['api_key'] = None
+if 'processed_docs' not in st.session_state:
+    st.session_state['processed_docs'] = set()  # To track processed documents
 
 # Status emojis
 STATUS_EMOJIS = {
@@ -28,10 +42,12 @@ STATUS_EMOJIS = {
 
 def analyze_with_claude(filename, file_type):
     try:
-        api_key = "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"
-        
+        if not st.session_state['api_key']:
+            st.error("Please enter your Claude API key first")
+            return None
+            
         headers = {
-            "x-api-key": api_key,
+            "x-api-key": st.session_state['api_key'],
             "content-type": "application/json",
             "anthropic-version": "2023-06-01"
         }
@@ -57,11 +73,13 @@ def analyze_with_claude(filename, file_type):
             result = response.json()
             if 'content' in result and len(result['content']) > 0:
                 return result['content'][0]['text']
-        
-        return "Analysis not available."
+        else:
+            st.error(f"API Error {response.status_code}: {response.text}")
+            return None
             
     except Exception as e:
-        return f"Analysis error: {str(e)}"
+        st.error(f"Error analyzing document: {str(e)}")
+        return None
 
 def login_user(email, password):
     return email == "admin" and password == "admin123"
@@ -88,6 +106,13 @@ if not st.session_state['logged_in']:
 else:
     check_expired_items()
 
+    # API Key Configuration
+    st.sidebar.title("Configuration")
+    api_key = st.sidebar.text_input("Enter Claude API Key", type="password")
+    if st.sidebar.button("Save API Key"):
+        st.session_state['api_key'] = api_key
+        st.sidebar.success("API Key saved!")
+
     # Profile dropdown in header
     col1, col2 = st.columns([0.9, 0.1])
     with col2:
@@ -98,6 +123,7 @@ else:
                 st.info("Document Signer App v1.0")
             if st.button("Logout"):
                 st.session_state['logged_in'] = False
+                st.session_state['api_key'] = None
                 st.rerun()
 
     # Main content
@@ -108,45 +134,52 @@ else:
     uploaded_files = st.file_uploader("Choose files", type=['pdf', 'docx', 'png', 'jpg'], 
                                     accept_multiple_files=True)
 
-    if uploaded_files:
+    if uploaded_files and st.session_state['api_key']:
         for uploaded_file in uploaded_files:
-            doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
-            st.session_state['doc_id_counter'] += 1
-            upload_time = datetime.now()
-            
-            # Get Claude's analysis
-            analysis = analyze_with_claude(uploaded_file.name, uploaded_file.type)
-            
-            if not any(doc['name'] == uploaded_file.name and doc['status'] == 'Pending' 
-                      for doc in st.session_state['documents']):
-                # Add to documents list
-                st.session_state['documents'].append({
-                    'id': doc_id,
-                    'name': uploaded_file.name,
-                    'status': 'Pending',
-                    'upload_time': upload_time,
-                    'analysis': analysis
-                })
+            # Check if document has already been processed
+            if uploaded_file.name not in st.session_state['processed_docs']:
+                doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
+                st.session_state['doc_id_counter'] += 1
+                upload_time = datetime.now()
                 
-                # Add to history with Pending status
-                st.session_state['history'].append({
-                    'date': upload_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    'id': doc_id,
-                    'name': uploaded_file.name,
-                    'status': f"Pending {STATUS_EMOJIS['Pending']}",
-                    'analysis': analysis
-                })
+                # Get Claude's analysis
+                analysis = analyze_with_claude(uploaded_file.name, uploaded_file.type)
                 
-                # Show analysis
-                with st.expander(f"Analysis for {uploaded_file.name}"):
-                    st.write(analysis)
+                if analysis:
+                    # Add to documents list
+                    st.session_state['documents'].append({
+                        'id': doc_id,
+                        'name': uploaded_file.name,
+                        'status': 'Pending',
+                        'upload_time': upload_time,
+                        'analysis': analysis
+                    })
+                    
+                    # Add to history with Pending status
+                    st.session_state['history'].append({
+                        'date': upload_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        'id': doc_id,
+                        'name': uploaded_file.name,
+                        'status': f"Pending {STATUS_EMOJIS['Pending']}",
+                        'analysis': analysis
+                    })
+                    
+                    # Mark document as processed
+                    st.session_state['processed_docs'].add(uploaded_file.name)
+                    
+                    # Show analysis
+                    with st.expander(f"Analysis for {uploaded_file.name}"):
+                        st.write(analysis)
                 
         st.success(f"{len(uploaded_files)} document(s) uploaded successfully!")
+    elif uploaded_files and not st.session_state['api_key']:
+        st.warning("Please configure your Claude API key in the sidebar first")
 
     # Document Status Section
     st.header("Document Status")
     pending_docs = [doc for doc in st.session_state['documents'] 
-                   if doc['status'] == 'Pending']
+                   if doc['status'] == 'Pending' and 
+                   doc['id'] not in st.session_state['document_removal_times']]
     
     if pending_docs:
         for doc in pending_docs:
@@ -197,7 +230,7 @@ else:
     if st.session_state['history']:
         df_history = pd.DataFrame(st.session_state['history'])
         
-        # 1. Document Status Distribution
+        # Status Distribution
         st.subheader("Document Status Distribution")
         status_counts = df_history['status'].apply(lambda x: x.split()[0]).value_counts()
         
@@ -213,9 +246,9 @@ else:
             
         st.bar_chart(status_counts)
         
-        # 2. Time Analysis
-        st.subheader("Processing Time Analysis")
+        # Time Analysis
         if st.session_state['action_times']:
+            st.subheader("Processing Time Analysis")
             time_diffs = [(action - upload).total_seconds() 
                          for upload, action in st.session_state['action_times']]
             avg_time = sum(time_diffs) / len(time_diffs)
@@ -227,6 +260,17 @@ else:
             st.line_chart(time_data.set_index('Document'))
             st.metric("Average Time to Sign", f"{avg_time:.1f} seconds")
 
-        # 3. Document Volume
+        # Document Volume
         st.subheader("Total Documents")
         st.metric("Total Documents Processed", len(st.session_state['history']))
+
+
+#Key changes:
+#1. Added API key input field in sidebar
+#2. Added processed_docs tracking to prevent duplicates
+#3. Documents won't be processed without API key
+#4. Fixed document reappearing issue
+#5. Added better feedback for API key status
+#6. Improved error handling
+
+#Would you like any adjustments to this implementation?
