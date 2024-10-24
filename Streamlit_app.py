@@ -1,121 +1,143 @@
 import streamlit as st
 import os
-from PIL import Image
-from io import BytesIO
+import pandas as pd
 import subprocess
+from datetime import datetime
+from PIL import Image
 
-# Predefined user credentials (for MVP, hardcoded users)
-users = {
-    "admin@example.com": "admin123",
-    "assistant@example.com": "assist456"
-}
-
-# Set up app title
-st.title("Document Review & Approval System")
-
-# Authentication functions
-def login_user(email, password):
-    if email in users and users[email] == password:
-        return True
-    else:
-        return False
-
-# Logout function
-def logout():
-    if 'logged_in' in st.session_state:
-        del st.session_state['logged_in']
-        del st.session_state['email']
-
-# Initialize session state for login
+# Initialize user login state
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
-# User login
-if not st.session_state['logged_in']:
-    # User login form
-    st.subheader("Login to access")
+if 'documents' not in st.session_state:
+    st.session_state['documents'] = []
 
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+# Authentication function
+def login_user(email, password):
+    users = {"admin@example.com": "admin123", "assistant@example.com": "assist456"}
+    if email in users and users[email] == password:
+        return True
+    return False
 
-    if st.button("Login"):
-        if login_user(email, password):
-            st.session_state['logged_in'] = True
-            st.session_state['email'] = email
-            st.success("Login successful!")
-        else:
-            st.error("Invalid email or password")
+# Logout function
+def logout():
+    st.session_state['logged_in'] = False
 
-else:
-    # Logout button
+# Style
+st.markdown(
+    """
+    <style>
+    body {
+        background-color: #f0f0f0;
+    }
+    .stApp {
+        background-color: #1f1f1f;
+    }
+    .persona {
+        color: #ffffff;
+        font-size: 20px;
+        padding: 10px;
+    }
+    .hero {
+        font-size: 30px;
+        font-weight: bold;
+        color: #29a745;
+    }
+    .hero-sub {
+        font-size: 18px;
+        color: #f1f1f1;
+    }
+    .btn-style {
+        background-color: #e67e22;
+        color: white;
+        border-radius: 8px;
+        padding: 10px;
+    }
+    .stButton>button {
+        background-color: #28a745;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        padding: 5px 10px;
+    }
+    .profile-dropdown {
+        background-color: #1f1f1f;
+        border: 1px solid #e67e22;
+        padding: 10px;
+        color: #fff;
+    }
+    </style>
+    """, unsafe_allow_html=True
+)
+
+# Sidebar Persona Icon for Profile and Logout
+with st.sidebar:
+    st.image("https://img.icons8.com/ios-filled/50/ffffff/user-male-circle.png", width=80)
+    if st.button("My Profile"):
+        st.info("My Profile page is under development.")
+    if st.button("Contact Developer"):
+        st.info("Contact Developer: Email example@example.com.")
+    if st.button("About Us"):
+        st.info("We provide solutions for managers on the go.")
     if st.button("Logout"):
         logout()
         st.success("Logged out successfully!")
-        st.stop()  # Stop the app execution to refresh the login state
+        st.stop()
 
-    # Main app logic once logged in
-    st.header(f"Welcome, {st.session_state['email']}!")
+# Login Form
+if not st.session_state['logged_in']:
+    st.header("Login")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if login_user(email, password):
+            st.session_state['logged_in'] = True
+            st.success("Login successful!")
+        else:
+            st.error("Invalid email or password")
+else:
+    # Hero Section
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.image("https://img.icons8.com/external-flat-juicy-fish/64/ffffff/external-stamp-marketing-flat-flat-juicy-fish.png", width=100)
+    with col2:
+        st.markdown("<div class='hero'>Signer</div>", unsafe_allow_html=True)
+        st.markdown("<div class='hero-sub'>A solution for traveling managers</div>", unsafe_allow_html=True)
 
-    # Define the upload folder
-    UPLOAD_FOLDER = './uploads'
-
-    # Ensure the upload folder exists
-    if not os.path.exists(UPLOAD_FOLDER):
-        os.makedirs(UPLOAD_FOLDER)
-
-    # Assistant: Upload a document
+    # File Upload Section
     st.header("Upload Document")
     uploaded_file = st.file_uploader("Choose a file", type=['png', 'jpg', 'pdf', 'docx'])
 
     if uploaded_file is not None:
-        # Save the uploaded file to the uploads directory
-        file_path = os.path.join(UPLOAD_FOLDER, uploaded_file.name)
-
+        # Save file and generate unique document ID
+        file_path = f"./uploads/{uploaded_file.name}"
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
+        
+        doc_id = f"signer{len(st.session_state['documents']) + 1:03}"
+        date_time = datetime.now().strftime("%Y%m%d%H%M%S")
+        st.success(f"Document '{uploaded_file.name}' uploaded successfully!")
 
-        st.success(f"File '{uploaded_file.name}' uploaded successfully!")
-        st.write(f"File saved to: {file_path}")
+        # Add document details to session state
+        st.session_state['documents'].append({
+            'Document Name': uploaded_file.name,
+            'ID': doc_id,
+            'Status': 'Pending',
+            'Date': date_time
+        })
 
-        # If it's an image, display the preview
-        if uploaded_file.type.startswith('image/'):
-            st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
+        # Show Document Table
+        if st.session_state['documents']:
+            st.header("Document Status")
+            df = pd.DataFrame(st.session_state['documents'])
+            st.dataframe(df)
 
-        # Admin: Review and Approve
-        st.header("Admin Review")
-        approve = st.button("Approve and Apply Stamp")
-
-        if approve:
-            # Simulate applying a stamp (example with bash)
-            if uploaded_file.type.startswith('image/'):
-                # Example of using external bash command on images
-                stamp_command = f"echo 'Stamp applied to {file_path}'"
-                result = subprocess.run(stamp_command, shell=True, capture_output=True, text=True)
-                if result.returncode == 0:
-                    st.success(f"Document approved. {result.stdout}")
-                else:
-                    st.error(f"Error: {result.stderr}")
-            else:
-                st.info(f"Approval logic for {uploaded_file.type} to be added.")
+        # Approve and Update Status
+        if st.button("Approve and Apply Stamp"):
+            for doc in st.session_state['documents']:
+                if doc['Document Name'] == uploaded_file.name:
+                    doc['Status'] = "Authorized"
+                    st.success(f"Document '{uploaded_file.name}' has been authorized.")
+    
     else:
         st.info("Upload a document to start the review process.")
-
-    # Additional CSS Styling
-    st.markdown("""
-    <style>
-        h1 {
-            color: #4CAF50;
-            font-size: 32px;
-        }
-        .stButton button {
-            background-color: #28a745;
-            color: white;
-            border: none;
-            padding: 10px;
-            cursor: pointer;
-        }
-        .stButton button:hover {
-            background-color: #218838;
-        }
-    </style>
-    """, unsafe_allow_html=True)
