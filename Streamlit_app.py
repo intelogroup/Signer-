@@ -88,7 +88,7 @@ Document content to analyze:
             "messages": [
                 {"role": "user", "content": prompt.format(text=text)}
             ],
-            "max_tokens": 1000,
+            "max_tokens": 500,
             "temperature": 0.1
         }
         
