@@ -30,7 +30,8 @@ def analyze_with_claude(filename, file_type):
                                "2. Note to check for any mention of Kalinov Jim Rozensky DAMEUS.\n"
                                "3. Standard processing recommendations."
                 }
-            ]
+            ],
+            "max_tokens": 500  # Setting the maximum number of tokens for the response
         }
 
         # Send the POST request to Claude API
