@@ -4,39 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import json
 
-# Custom CSS for navigation
-st.markdown("""
-<style>
-    .nav-link {
-        padding: 10px 15px;
-        border-radius: 5px;
-        margin: 5px 0;
-        text-decoration: none;
-        display: flex;
-        align-items: center;
-        color: white;
-        font-weight: bold;
-    }
-    .nav-upload {
-        background-color: #FF4B4B;
-    }
-    .nav-status {
-        background-color: #00CC00;
-    }
-    .nav-history {
-        background-color: #000080;
-    }
-    .nav-analytics {
-        background-color: #FF9900;
-    }
-    .nav-icon {
-        margin-right: 10px;
-        font-size: 20px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Initialize session state
+# Initialize session state with all required variables
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 if 'documents' not in st.session_state:
@@ -141,6 +109,7 @@ def check_expired_items():
             st.session_state['documents'] = [doc for doc in st.session_state['documents'] if doc['id'] != doc_id]
             del st.session_state['document_removal_times'][doc_id]
 
+
 def show_upload_section():
     st.header("Upload Documents 📤")
     
@@ -151,40 +120,27 @@ def show_upload_section():
         for uploaded_file in uploaded_files:
             doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
             st.session_state['doc_id_counter'] += 1
-            upload_time = datetime.now()
             
-            # Add directly to documents list
-            doc_data = {
-                'id': doc_id,
-                'name': uploaded_file.name,
-                'status': 'Pending',
-                'upload_time': upload_time,
-                'file_type': uploaded_file.type,
-                'file_size': uploaded_file.size,
-                'content': extract_text_content(uploaded_file),
-                'analysis': None  # Will be populated when processed
-            }
-            
-            # Add to both documents and pending analysis
-            st.session_state['documents'].append(doc_data)
-            st.session_state['pending_analysis'].append(doc_data.copy())
-            
-            # Add to history
-            st.session_state['history'].append({
-                'date': upload_time.strftime("%Y-%m-%d %H:%M:%S"),
-                'id': doc_id,
-                'name': uploaded_file.name,
-                'status': f"Pending {STATUS_EMOJIS['Pending']}",
-                'analysis': None
-            })
-            
-            log_user_action('upload', f"Uploaded document: {uploaded_file.name}")
+            # Add to pending analysis
+            if not any(doc['name'] == uploaded_file.name for doc in st.session_state['pending_analysis']):
+                doc_data = {
+                    'id': doc_id,
+                    'name': uploaded_file.name,
+                    'status': 'Pending',
+                    'upload_time': datetime.now(),
+                    'file_type': uploaded_file.type,
+                    'file_size': uploaded_file.size,
+                    'content': extract_text_content(uploaded_file),
+                    'analyzed': False
+                }
+                st.session_state['pending_analysis'].append(doc_data)
+                log_user_action('upload', f"Uploaded document: {uploaded_file.name}")
         
         st.success(f"Successfully uploaded {len(uploaded_files)} document(s)!")
 
-    # Show documents available for analysis
+    # Show pending documents
     if st.session_state['pending_analysis']:
-        st.subheader("Documents Available for Analysis")
+        st.subheader("Documents Pending Analysis")
         
         selected_docs = []
         for doc in st.session_state['pending_analysis']:
@@ -198,31 +154,40 @@ def show_upload_section():
                     selected_docs.append(doc)
         
         if selected_docs:
-            if st.button(f"Analyze Selected Documents ({len(selected_docs)})", type="primary"):
-                with st.spinner("Analyzing selected documents..."):
+            if st.button(f"Process Selected Documents ({len(selected_docs)})", type="primary"):
+                with st.spinner("Processing selected documents..."):
                     for doc in selected_docs:
                         # Analyze document
                         analysis = analyze_with_claude(doc['content'])
                         
-                        # Update analysis in documents list
-                        for stored_doc in st.session_state['documents']:
-                            if stored_doc['id'] == doc['id']:
-                                stored_doc['analysis'] = analysis
-                                break
+                        # Add to documents list
+                        doc_data = {
+                            'id': doc['id'],
+                            'name': doc['name'],
+                            'status': 'Pending',
+                            'upload_time': doc['upload_time'],
+                            'analysis': analysis,
+                            'file_type': doc['file_type'],
+                            'file_size': doc['file_size']
+                        }
                         
-                        # Update history
-                        for hist_doc in st.session_state['history']:
-                            if hist_doc['id'] == doc['id']:
-                                hist_doc['analysis'] = analysis
+                        st.session_state['documents'].append(doc_data)
+                        st.session_state['history'].append({
+                            'date': doc['upload_time'].strftime("%Y-%m-%d %H:%M:%S"),
+                            'id': doc['id'],
+                            'name': doc['name'],
+                            'status': f"Pending {STATUS_EMOJIS['Pending']}",
+                            'analysis': analysis
+                        })
                         
-                        # Remove from pending analysis
+                        # Remove from pending
                         st.session_state['pending_analysis'] = [
                             d for d in st.session_state['pending_analysis'] if d['id'] != doc['id']
                         ]
                         
-                        log_user_action('analyze', f"Analyzed document: {doc['name']}")
+                        log_user_action('process', f"Processed document: {doc['name']}")
                 
-                st.success("Selected documents analyzed successfully!")
+                st.success("Selected documents processed successfully!")
                 st.rerun()
 
 def show_status_section():
@@ -244,30 +209,28 @@ def show_status_section():
                     st.write(f"📄 {doc['name']} | Status: {doc['status']} {STATUS_EMOJIS[doc['status']]}")
                     st.caption(f"Uploaded: {doc['upload_time'].strftime('%Y-%m-%d %H:%M:%S')}")
                 
-                with col2:
-                    if st.button(f"View", key=f"view_{doc['id']}"):
-                        with st.expander("Document Details", expanded=True):
-                            st.write("File Information:")
-                            st.write(f"Type: {doc['file_type'] or 'unknown'}")
-                            st.write(f"Size: {doc['file_size']/1024:.1f} KB")
-                            if doc.get('analysis'):
-                                st.write("Analysis Results:")
-                                tab1, tab2 = st.tabs(["Formatted Analysis", "Raw Analysis"])
-                                with tab1:
-                                    sections = doc['analysis'].split('\n')
-                                    for section in sections:
-                                        if any(header in section for header in ["NAMES:", "KEY INFORMATION:", 
-                                                                              "DOCUMENT TYPE:", "DATES & NUMBERS:", 
-                                                                              "RELATIONSHIPS:", "SUMMARY:"]):
-                                            st.markdown(f"### {section}")
-                                        elif section.strip():
-                                            st.write(section)
-                                with tab2:
-                                    st.text_area("Full Analysis", doc['analysis'], height=300)
-                            else:
-                                st.info("No analysis available")
-                
                 if doc['status'] == 'Pending':
+                    with col2:
+                        if st.button(f"View", key=f"view_{doc['id']}"):
+                            with st.expander("Analysis", expanded=True):
+                                if doc.get('analysis'):
+                                    tab1, tab2 = st.tabs(["Formatted Analysis", "Raw Analysis"])
+                                    
+                                    with tab1:
+                                        sections = doc['analysis'].split('\n')
+                                        for section in sections:
+                                            if any(header in section for header in ["NAMES:", "KEY INFORMATION:", 
+                                                                                  "DOCUMENT TYPE:", "DATES & NUMBERS:", 
+                                                                                  "RELATIONSHIPS:", "SUMMARY:"]):
+                                                st.markdown(f"### {section}")
+                                            elif section.strip():
+                                                st.write(section)
+                                    
+                                    with tab2:
+                                        st.text_area("Full Analysis", doc['analysis'], height=300)
+                                else:
+                                    st.info("No analysis available")
+                    
                     with col3:
                         if st.button(f"Accept", key=f"accept_{doc['id']}"):
                             doc['status'] = "Authorized"
@@ -372,11 +335,11 @@ def show_enhanced_analytics():
                 # Quick Stats
                 st.subheader("Quick Statistics")
                 total_docs = len(df_history)
-                pending_analysis = len(st.session_state['pending_analysis'])
-                analyzed_docs = len([d for d in st.session_state['documents'] if d.get('analysis')])
+                pending_docs = len([d for d in st.session_state['documents'] if d['status'] == 'Pending'])
+                analyzed_docs = len([d for d in st.session_state['documents'] if 'analysis' in d])
                 
                 st.metric("Total Documents", total_docs)
-                st.metric("Pending Analysis", pending_analysis)
+                st.metric("Pending Documents", pending_docs)
                 st.metric("Analyzed Documents", analyzed_docs)
                 
                 # Processing Status
@@ -503,6 +466,7 @@ def show_enhanced_analytics():
             
             st.json(report_data)
             
+            # Export option
             if st.download_button(
                 "Download Report (JSON)",
                 data=json.dumps(report_data, indent=2),
@@ -510,26 +474,6 @@ def show_enhanced_analytics():
                 mime="application/json"
             ):
                 st.success("Report downloaded successfully!")
-
-def show_navigation():
-    st.sidebar.markdown("""
-        <a href="#" class="nav-link nav-upload" onclick=''>
-            <span class="nav-icon">📤</span> Upload
-        </a>
-        <a href="#" class="nav-link nav-status" onclick=''>
-            <span class="nav-icon">📋</span> Status
-        </a>
-        <a href="#" class="nav-link nav-history" onclick=''>
-            <span class="nav-icon">📚</span> History
-        </a>
-        <a href="#" class="nav-link nav-analytics" onclick=''>
-            <span class="nav-icon">📊</span> Analytics
-        </a>
-    """, unsafe_allow_html=True)
-    
-    # Hidden radio for actual navigation
-    return st.sidebar.radio("", ["Upload", "Status", "History", "Analytics"], 
-                          key="selected_view", label_visibility="collapsed")
 
 def main():
     if not st.session_state['logged_in']:
@@ -560,14 +504,17 @@ def main():
                 if st.button("👤 My Profile"):
                     st.info("Profile settings coming soon")
                 if st.button("ℹ️ About"):
-                    st.info("Document Analyzer & Signer v4.0")
+                    st.info("Document Analyzer & Signer v3.0")
                 if st.button("🚪 Logout"):
                     log_user_action('logout', 'User logged out')
                     st.session_state['logged_in'] = False
                     st.rerun()
         
-        # Enhanced Navigation
-        view = show_navigation()
+        # Navigation
+        st.sidebar.title("Navigation")
+        view = st.sidebar.radio("Go to", 
+                              ["Upload", "Status", "History", "Analytics"],
+                              key="selected_view")
         
         # Main content based on selected view
         if view == "Upload":
