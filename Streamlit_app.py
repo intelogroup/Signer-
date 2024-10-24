@@ -427,60 +427,6 @@ def main():
 if __name__ == "__main__":
     main()  
 
-def generate_custom_report(start_date, end_date, metrics):
-    """Generate custom report based on selected metrics"""
-    report_data = {}
-    
-    df_history = pd.DataFrame(st.session_state['history'])
-    df_history['date'] = pd.to_datetime(df_history['date'])
-    mask = (df_history['date'].dt.date >= start_date) & (df_history['date'].dt.date <= end_date)
-    filtered_df = df_history[mask]
-    
-    if 'document_stats' in metrics:
-        report_data['document_stats'] = {
-            'total_documents': len(filtered_df),
-            'status_distribution': filtered_df['status'].apply(lambda x: x.split()[0]).value_counts().to_dict(),
-            'file_types': pd.DataFrame(st.session_state['documents'])['file_type'].value_counts().to_dict(),
-            'avg_file_size': pd.DataFrame(st.session_state['documents'])['file_size'].mean() / 1024  # KB
-        }
-    
-    if 'processing_times' in metrics:
-        time_diffs = [(action - upload).total_seconds() 
-                     for upload, action in st.session_state['action_times']]
-        report_data['processing_times'] = {
-            'average_time': sum(time_diffs) / len(time_diffs) if time_diffs else 0,
-            'max_time': max(time_diffs) if time_diffs else 0,
-            'min_time': min(time_diffs) if time_diffs else 0,
-            'time_distribution': pd.qcut(time_diffs, 4).value_counts().to_dict() if time_diffs else {}
-        }
-    
-    if 'user_activity' in metrics:
-        df_actions = pd.DataFrame(st.session_state['user_actions'])
-        if not df_actions.empty:
-            df_actions['timestamp'] = pd.to_datetime(df_actions['timestamp'])
-            mask = (df_actions['timestamp'].dt.date >= start_date) & 
-                  (df_actions['timestamp'].dt.date <= end_date)
-            filtered_actions = df_actions[mask]
-            
-            report_data['user_activity'] = {
-                'total_actions': len(filtered_actions),
-                'action_types': filtered_actions['action'].value_counts().to_dict(),
-                'daily_activity': filtered_actions.groupby(
-                    filtered_actions['timestamp'].dt.date
-                ).size().to_dict()
-            }
-    
-    if 'performance_metrics' in metrics:
-        report_data['performance_metrics'] = {
-            'approval_rate': len(filtered_df[filtered_df['status'].str.contains('Authorized')]) / 
-                           len(filtered_df) if len(filtered_df) > 0 else 0,
-            'rejection_rate': len(filtered_df[filtered_df['status'].str.contains('Rejected')]) / 
-                            len(filtered_df) if len(filtered_df) > 0 else 0,
-            'average_processing_time': np.mean(time_diffs) if time_diffs else 0
-        }
-    
-    return report_data
-
 def show_enhanced_analytics():
     st.title("Enhanced Analytics Dashboard 📊")
     
@@ -494,40 +440,27 @@ def show_enhanced_analytics():
             col1, col2 = st.columns(2)
             
             with col1:
-                # Enhanced Status Distribution
+                # Status Distribution
                 st.subheader("Status Distribution")
                 df_history = pd.DataFrame(st.session_state['history'])
                 status_counts = df_history['status'].apply(lambda x: x.split()[0]).value_counts()
-                fig_status = px.pie(values=status_counts.values, 
-                                  names=status_counts.index, 
-                                  title="Document Status Distribution")
-                st.plotly_chart(fig_status)
+                st.bar_chart(status_counts)
                 
                 # Document Types Analysis
                 st.subheader("Document Types")
                 doc_types = pd.DataFrame(st.session_state['documents'])['file_type'].value_counts()
-                fig_types = px.bar(x=doc_types.index, 
-                                 y=doc_types.values, 
-                                 title="Document Types Distribution")
-                st.plotly_chart(fig_types)
+                st.bar_chart(doc_types)
             
             with col2:
-                # Processing Time Distribution
-                if st.session_state['action_times']:
-                    st.subheader("Processing Time Distribution")
-                    time_diffs = [(action - upload).total_seconds() 
-                                for upload, action in st.session_state['action_times']]
-                    fig_time = px.histogram(x=time_diffs, 
-                                          title="Processing Time Distribution",
-                                          labels={'x': 'Time (seconds)'})
-                    st.plotly_chart(fig_time)
+                # Quick Stats
+                st.subheader("Quick Statistics")
+                total_docs = len(df_history)
+                pending_docs = len([d for d in st.session_state['documents'] if d['status'] == 'Pending'])
+                analyzed_docs = len([d for d in st.session_state['documents'] if 'analysis' in d])
                 
-                # Document Size Analysis
-                st.subheader("Document Sizes")
-                doc_sizes = pd.DataFrame(st.session_state['documents'])['file_size'] / 1024  # KB
-                fig_sizes = px.box(doc_sizes, 
-                                 title="Document Size Distribution (KB)")
-                st.plotly_chart(fig_sizes)
+                st.metric("Total Documents", total_docs)
+                st.metric("Pending Documents", pending_docs)
+                st.metric("Analyzed Documents", analyzed_docs)
     
     with tabs[1]:  # User Activity
         st.header("User Activity Analysis")
@@ -539,29 +472,12 @@ def show_enhanced_analytics():
             # Activity Timeline
             st.subheader("Activity Timeline")
             daily_activity = df_actions.groupby(df_actions['timestamp'].dt.date).size()
-            fig_timeline = px.line(x=daily_activity.index, 
-                                 y=daily_activity.values,
-                                 title="Daily Activity Volume")
-            st.plotly_chart(fig_timeline)
+            st.line_chart(daily_activity)
             
             # Action Type Distribution
             st.subheader("Action Type Distribution")
             action_counts = df_actions['action'].value_counts()
-            fig_actions = px.pie(values=action_counts.values,
-                               names=action_counts.index,
-                               title="User Actions Distribution")
-            st.plotly_chart(fig_actions)
-            
-            # Hourly Activity Heatmap
-            st.subheader("Hourly Activity Pattern")
-            hourly_activity = df_actions.groupby([
-                df_actions['timestamp'].dt.dayofweek,
-                df_actions['timestamp'].dt.hour
-            ]).size().unstack()
-            fig_heatmap = px.imshow(hourly_activity,
-                                  title="Activity Heatmap by Hour and Day",
-                                  labels=dict(x="Hour of Day", y="Day of Week"))
-            st.plotly_chart(fig_heatmap)
+            st.bar_chart(action_counts)
     
     with tabs[2]:  # Performance Metrics
         st.header("Performance Metrics")
@@ -572,22 +488,16 @@ def show_enhanced_analytics():
             with col1:
                 # Processing Efficiency
                 st.subheader("Processing Efficiency")
-                processing_times = pd.Series([(action - upload).total_seconds() 
-                                           for upload, action in st.session_state['action_times']])
-                
-                efficiency_metrics = {
-                    "Average Processing Time": f"{processing_times.mean():.1f}s",
-                    "90th Percentile": f"{processing_times.quantile(0.9):.1f}s",
-                    "Processing Time StdDev": f"{processing_times.std():.1f}s"
-                }
-                
-                for metric, value in efficiency_metrics.items():
-                    st.metric(metric, value)
-                
-                # Efficiency Trend
-                fig_trend = px.line(y=processing_times.rolling(5).mean(),
-                                  title="Processing Time Trend (5-doc rolling average)")
-                st.plotly_chart(fig_trend)
+                time_diffs = [(action - upload).total_seconds() 
+                             for upload, action in st.session_state['action_times']]
+                if time_diffs:
+                    avg_time = sum(time_diffs) / len(time_diffs)
+                    max_time = max(time_diffs)
+                    min_time = min(time_diffs)
+                    
+                    st.metric("Average Processing Time", f"{avg_time:.1f}s")
+                    st.metric("Fastest Processing", f"{min_time:.1f}s")
+                    st.metric("Slowest Processing", f"{max_time:.1f}s")
             
             with col2:
                 # Success Metrics
@@ -595,21 +505,12 @@ def show_enhanced_analytics():
                 df_history = pd.DataFrame(st.session_state['history'])
                 total_docs = len(df_history)
                 
-                approval_rate = len(df_history[df_history['status'].str.contains('Authorized')]) / total_docs
-                rejection_rate = len(df_history[df_history['status'].str.contains('Rejected')]) / total_docs
-                
-                st.metric("Approval Rate", f"{approval_rate:.1%}")
-                st.metric("Rejection Rate", f"{rejection_rate:.1%}")
-                
-                # Daily Success Rates
-                df_history['date'] = pd.to_datetime(df_history['date'])
-                daily_rates = df_history.groupby(df_history['date'].dt.date).agg({
-                    'status': lambda x: sum(x.str.contains('Authorized')) / len(x)
-                })
-                
-                fig_rates = px.line(daily_rates,
-                                  title="Daily Approval Rates")
-                st.plotly_chart(fig_rates)
+                if total_docs > 0:
+                    approval_rate = len(df_history[df_history['status'].str.contains('Authorized')]) / total_docs
+                    rejection_rate = len(df_history[df_history['status'].str.contains('Rejected')]) / total_docs
+                    
+                    st.metric("Approval Rate", f"{approval_rate:.1%}")
+                    st.metric("Rejection Rate", f"{rejection_rate:.1%}")
     
     with tabs[3]:  # Custom Reports
         st.header("Custom Report Generator")
@@ -622,54 +523,64 @@ def show_enhanced_analytics():
             end_date = st.date_input("End Date",
                                    value=datetime.now())
         
-        # Select metrics to include
-        st.subheader("Select Metrics to Include")
         metrics = st.multiselect(
             "Choose metrics for your report",
-            ["document_stats", "processing_times", "user_activity", "performance_metrics"],
-            default=["document_stats"]
+            ["Document Statistics", "Processing Times", "User Activity", "Performance Metrics"],
+            default=["Document Statistics"]
         )
         
         if st.button("Generate Report"):
-            report_data = generate_custom_report(start_date, end_date, metrics)
+            report_data = {
+                "Report Period": f"{start_date} to {end_date}",
+                "Generated At": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Metrics": {}
+            }
             
-            st.subheader("Generated Report")
+            df_history = pd.DataFrame(st.session_state['history'])
+            if not df_history.empty:
+                df_history['date'] = pd.to_datetime(df_history['date'])
+                mask = (df_history['date'].dt.date >= start_date) & (df_history['date'].dt.date <= end_date)
+                filtered_df = df_history[mask]
+                
+                if "Document Statistics" in metrics:
+                    report_data["Metrics"]["Document Statistics"] = {
+                        "Total Documents": len(filtered_df),
+                        "Status Distribution": filtered_df['status'].apply(
+                            lambda x: x.split()[0]).value_counts().to_dict()
+                    }
+                
+                if "Processing Times" in metrics and st.session_state['action_times']:
+                    time_diffs = [(action - upload).total_seconds() 
+                                 for upload, action in st.session_state['action_times']]
+                    report_data["Metrics"]["Processing Times"] = {
+                        "Average Time": f"{sum(time_diffs) / len(time_diffs):.1f}s",
+                        "Fastest": f"{min(time_diffs):.1f}s",
+                        "Slowest": f"{max(time_diffs):.1f}s"
+                    }
+            
             st.json(report_data)
             
-            # Export options
-            export_format = st.selectbox("Export Format", ["JSON", "CSV", "Excel"])
-            if st.button("Export Report"):
-                if export_format == "JSON":
-                    st.download_button(
-                        "Download JSON",
-                        data=json.dumps(report_data, indent=2),
-                        file_name="analytics_report.json",
-                        mime="application/json"
-                    )
-                elif export_format == "CSV":
-                    df_report = pd.json_normalize(report_data)
-                    st.download_button(
-                        "Download CSV",
-                        data=df_report.to_csv(index=False),
-                        file_name="analytics_report.csv",
-                        mime="text/csv"
-                    )
-                else:  # Excel
-                    with io.BytesIO() as buffer:
-                        df_report = pd.json_normalize(report_data)
-                        df_report.to_excel(buffer, index=False)
-                        st.download_button(
-                            "Download Excel",
-                            data=buffer.getvalue(),
-                            file_name="analytics_report.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
+            # Export option
+            if st.download_button(
+                "Download Report (JSON)",
+                data=json.dumps(report_data, indent=2),
+                file_name="analytics_report.json",
+                mime="application/json"
+            ):
+                st.success("Report downloaded successfully!")
 
-# Update the main function to use enhanced analytics
+# Update the main function's analytics section
 def main():
-    # ... (previous main code remains the same until the view selection)
+    # ... (keep all the existing main code until the view selection)
     
-    if view == "Analytics":
+    if view == "Upload":
+        show_upload_section()
+    elif view == "Status":
+        show_status_section()
+    elif view == "History":
+        show_history_section()
+    elif view == "Analytics":
         show_enhanced_analytics()
-    # ... (rest of the main function remains the same)
 
+if __name__ == "__main__":
+    main()
