@@ -428,19 +428,24 @@ def render_nav_link(text, emoji, color_class, is_active):
 def main():
     if not st.session_state['logged_in']:
         st.title("Document Analyzer & Signer 📝")
-        with st.form("login_form"):
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Login")
-            if submitted:
-                if login_user(email, password):
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            with st.form("login_form", clear_on_submit=True):
+                email = st.text_input("Email")
+                password = st.text_input("Password", type="password")
+                submitted = st.form_submit_button("Login")
+                if submitted and login_user(email, password):
                     st.session_state['logged_in'] = True
                     log_user_action('login', 'User logged in')
                     st.success("Login successful!")
                     st.rerun()
-                else:
+                elif submitted:
                     st.error("Invalid email or password")
+        
+        with col2:
+            st.info("Use these credentials:\nEmail: admin\nPassword: admin123")
     else:
+        # Rest of the main function remains the same
         # Header with profile menu
         header_col1, header_col2 = st.columns([0.7, 0.3])
         with header_col1:
