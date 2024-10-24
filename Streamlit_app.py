@@ -1,12 +1,8 @@
-# I'll provide a simpler version without PDF 
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import requests
 import json
-from io import BytesIO
-from docx import Document
-from PIL import Image
 import io
 
 # Initialize session state
@@ -35,24 +31,9 @@ STATUS_EMOJIS = {
 }
 
 def extract_text_from_file(uploaded_file):
-    """Extract text from various file formats."""
+    """Extract text from text files."""
     try:
-        file_type = uploaded_file.type
-        content = ""
-        
-        if file_type == "text/plain":
-            content = uploaded_file.getvalue().decode('utf-8')
-                
-        elif "document" in file_type:  # Word documents
-            doc = Document(BytesIO(uploaded_file.getvalue()))
-            for para in doc.paragraphs:
-                content += para.text + "\n"
-                
-        elif "image" in file_type:  # Images (png, jpg)
-            # For images, we'll just acknowledge receipt since we can't extract text directly
-            content = f"Image file received: {uploaded_file.name}"
-            
-        return content.strip() if content else None
+        return uploaded_file.getvalue().decode('utf-8')
     except Exception as e:
         st.error(f"Error extracting text from {uploaded_file.name}: {str(e)}")
         return None
@@ -153,8 +134,8 @@ else:
     
     # File Upload Section
     st.header("Upload Document(s)")
-    uploaded_files = st.file_uploader("Choose files", 
-                                    type=['txt', 'docx', 'png', 'jpg'], 
+    uploaded_files = st.file_uploader("Choose text files", 
+                                    type=['txt'], 
                                     accept_multiple_files=True)
 
     if uploaded_files and st.session_state['api_key']:
@@ -297,12 +278,3 @@ else:
         # Document Volume
         st.subheader("Total Documents")
         st.metric("Total Documents Processed", len(st.session_state['history']))
-
-#Changes made:
-#1. Removed PyPDF2 dependency
-#2. Simplified file type support to txt, docx, and images
-#3. Added better error handling for unsupported files
-#4. Improved feedback messages
-#5. Kept all core functionality intact
-
-#Would you like any adjustments to this version?
