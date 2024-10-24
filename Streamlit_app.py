@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 import pandas as pd
-import subprocess
 from datetime import datetime
 from PIL import Image
 
@@ -23,7 +22,7 @@ def login_user(email, password):
 def logout():
     st.session_state['logged_in'] = False
 
-# Style
+# Custom Styling
 st.markdown(
     """
     <style>
@@ -31,7 +30,7 @@ st.markdown(
         background-color: #f0f0f0;
     }
     .stApp {
-        background-color: #1f1f1f;
+        background-color: #2C3E50;
     }
     .persona {
         color: #ffffff;
@@ -39,32 +38,37 @@ st.markdown(
         padding: 10px;
     }
     .hero {
-        font-size: 30px;
+        font-size: 35px;
         font-weight: bold;
-        color: #29a745;
+        color: #28a745;
+        margin-bottom: 10px;
     }
     .hero-sub {
-        font-size: 18px;
+        font-size: 20px;
         color: #f1f1f1;
+        margin-bottom: 20px;
     }
-    .btn-style {
-        background-color: #e67e22;
-        color: white;
-        border-radius: 8px;
-        padding: 10px;
-    }
-    .stButton>button {
-        background-color: #28a745;
-        color: white;
-        border: none;
-        border-radius: 5px;
-        padding: 5px 10px;
+    .document-status-table {
+        background-color: #fff;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 15px;
     }
     .profile-dropdown {
-        background-color: #1f1f1f;
-        border: 1px solid #e67e22;
-        padding: 10px;
+        padding: 5px;
         color: #fff;
+        background-color: #2C3E50;
+        border: 1px solid #e67e22;
+        border-radius: 5px;
+        margin-top: 10px;
+    }
+    .stButton>button {
+        background-color: #e67e22;
+        color: white;
+        padding: 8px 20px;
+        border: none;
+        border-radius: 5px;
+        font-weight: bold;
     }
     </style>
     """, unsafe_allow_html=True
@@ -99,7 +103,7 @@ else:
     # Hero Section
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.image("https://img.icons8.com/external-flat-juicy-fish/64/ffffff/external-stamp-marketing-flat-flat-juicy-fish.png", width=100)
+        st.image("https://img.icons8.com/external-flat-juicy-fish/64/ffffff/external-stamp-marketing-flat-flat-juicy-fish.png", width=120)
     with col2:
         st.markdown("<div class='hero'>Signer</div>", unsafe_allow_html=True)
         st.markdown("<div class='hero-sub'>A solution for traveling managers</div>", unsafe_allow_html=True)
@@ -126,11 +130,20 @@ else:
             'Date': date_time
         })
 
-        # Show Document Table
-        if st.session_state['documents']:
-            st.header("Document Status")
-            df = pd.DataFrame(st.session_state['documents'])
-            st.dataframe(df)
+        # Display the Document Table in Cards Format
+        st.header("Document Status")
+        for doc in st.session_state['documents']:
+            with st.container():
+                st.markdown(
+                    f"""
+                    <div class="document-status-table">
+                        <strong>Document:</strong> {doc['Document Name']}<br/>
+                        <strong>ID:</strong> {doc['ID']}<br/>
+                        <strong>Status:</strong> {doc['Status']}<br/>
+                        <strong>Date:</strong> {doc['Date']}<br/>
+                    </div>
+                    """, unsafe_allow_html=True
+                )
 
         # Approve and Update Status
         if st.button("Approve and Apply Stamp"):
