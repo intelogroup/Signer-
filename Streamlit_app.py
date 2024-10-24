@@ -1,55 +1,11 @@
 import streamlit as st
 import requests
-import re
 
 # Get API key from Streamlit secrets
 CLAUDE_API_KEY = st.secrets["CLAUDE_API_KEY"]
 
-def clean_rtf_content(text):
-    """Clean RTF content by removing control sequences and formatting"""
-    # Remove RTF control sequences
-    text = re.sub(r'\\[a-z]{1,32}[-]{0,1}[0-9]*[ ]{0,1}', ' ', text)
-    # Remove special characters and other RTF syntax
-    text = re.sub(r'[{}\\]', '', text)
-    # Remove multiple spaces
-    text = re.sub(r'\s+', ' ', text)
-    # Remove font table and color table
-    text = re.sub(r'{\*?\\[^{}]+}|{[^{}]+}', '', text)
-    # Split into lines and clean
-    lines = [line.strip() for line in text.split('\\par') if line.strip()]
-    return '\n'.join(lines)
-
-def format_content_preview(file, content):
-    """Format content based on file type"""
-    file_type = file.type if file.type else file.name.split('.')[-1].lower()
-    
-    try:
-        if 'rtf' in file_type:
-            cleaned_content = clean_rtf_content(content)
-            return cleaned_content
-        
-        elif any(ext in file_type for ext in ['pdf', 'docx', 'doc', 'txt']):
-            # Basic cleaning for other document types
-            # Remove excessive whitespace and empty lines
-            lines = content.split('\n')
-            cleaned_lines = []
-            for line in lines:
-                line = line.strip()
-                if line and not line.startswith('\\') and not line.startswith('{'):
-                    # Remove common control characters and noise
-                    line = re.sub(r'[\x00-\x1F\x7F-\x9F]', '', line)
-                    cleaned_lines.append(line)
-            return '\n'.join(cleaned_lines)
-        
-        else:
-            # For unknown file types, do basic cleaning
-            return re.sub(r'[\x00-\x1F\x7F-\x9F]', '', content)
-            
-    except Exception as e:
-        return f"Note: Content preview might contain formatting artifacts.\n\n{content}"
-
 def extract_text_content(uploaded_file):
-    """Extract and decode file content"""
+    """Attempt to extract text content from uploaded file"""
     try:
         content = uploaded_file.read()
         try:
@@ -88,7 +44,7 @@ Document content to analyze:
             "messages": [
                 {"role": "user", "content": prompt.format(text=text)}
             ],
-            "max_tokens": 500,
+            "max_tokens": 1000,
             "temperature": 0.1
         }
         
@@ -111,43 +67,30 @@ Document content to analyze:
 def main():
     st.title("📄 Universal Document Analyzer")
     
-    # File upload section with supported formats
-    st.markdown("""
-    ### Upload Document
-    Supported formats: PDF, DOCX, RTF, TXT, and more
-    """)
-    
-    uploaded_file = st.file_uploader("Choose a file", type=None)
+    # File upload - accepts any file type
+    uploaded_file = st.file_uploader("Upload any document", type=None)
     
     if uploaded_file:
         st.write("📄 Analyzing:", uploaded_file.name)
+        file_details = {
+            "Filename": uploaded_file.name,
+            "File type": uploaded_file.type,
+            "File size": f"{uploaded_file.size / 1024:.2f} KB"
+        }
         
-        # File details in a neat format
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("File Size", f"{uploaded_file.size / 1024:.1f} KB")
-        with col2:
-            st.metric("File Type", uploaded_file.type if uploaded_file.type else uploaded_file.name.split('.')[-1].upper())
+        # Display file details in expander
+        with st.expander("📌 File Details"):
+            for key, value in file_details.items():
+                st.write(f"**{key}:** {value}")
         
         try:
-            # Extract and format content
+            # Extract text content
             text_content = extract_text_content(uploaded_file)
-            formatted_content = format_content_preview(uploaded_file, text_content)
             
-            if formatted_content.strip():
-                # Show formatted content in expander
-                with st.expander("📝 Document Content"):
-                    st.markdown("### Document Preview")
-                    # Create a clean, formatted preview
-                    st.markdown("""---""")
-                    st.markdown(formatted_content[:5000] + ("..." if len(formatted_content) > 5000 else ""))
-                    st.markdown("""---""")
-                    if len(formatted_content) > 5000:
-                        st.info("⚠️ Preview truncated for better performance")
-                
+            if text_content.strip():
                 # Get analysis from Claude
                 with st.spinner("🔍 Analyzing document..."):
-                    analysis = analyze_with_claude(formatted_content)
+                    analysis = analyze_with_claude(text_content)
                     if analysis:
                         st.subheader("📊 Analysis Results")
                         
@@ -155,21 +98,24 @@ def main():
                         
                         with tab1:
                             sections = analysis.split('\n')
+                            current_section = ""
                             for section in sections:
                                 if any(header in section for header in ["NAMES:", "KEY INFORMATION:", "DOCUMENT TYPE:", 
                                                                       "DATES & NUMBERS:", "RELATIONSHIPS:", "SUMMARY:"]):
                                     st.markdown(f"### {section}")
+                                    current_section = section
                                 elif section.strip():
                                     st.write(section)
                         
                         with tab2:
                             st.text_area("Full Analysis", analysis, height=300)
                         
+                        # Save analysis
                         if st.button("💾 Save Analysis"):
                             st.session_state['last_analysis'] = {
                                 'filename': uploaded_file.name,
                                 'analysis': analysis,
-                                'timestamp': str(pd.Timestamp.now())
+                                'timestamp': str(st.session_state.get('current_time', 'Not recorded'))
                             }
                             st.success("✅ Analysis saved!")
             else:
