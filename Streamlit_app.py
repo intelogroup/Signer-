@@ -2,12 +2,18 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+import plotly.express as px
+import numpy as np
+import json
+import io
 
 # Initialize session state with all required variables
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 if 'documents' not in st.session_state:
     st.session_state['documents'] = []
+if 'pending_analysis' not in st.session_state:
+    st.session_state['pending_analysis'] = []
 if 'history' not in st.session_state:
     st.session_state['history'] = []
 if 'doc_id_counter' not in st.session_state:
@@ -18,11 +24,15 @@ if 'action_times' not in st.session_state:
     st.session_state['action_times'] = []
 if 'selected_view' not in st.session_state:
     st.session_state['selected_view'] = 'Upload'
+if 'user_actions' not in st.session_state:
+    st.session_state['user_actions'] = []
 
 STATUS_EMOJIS = {
     'Pending': '⏳',
     'Authorized': '✅',
-    'Rejected': '❌'
+    'Rejected': '❌',
+    'Processing': '🔄',
+    'Analyzed': '🔍'
 }
 
 def extract_text_content(uploaded_file):
@@ -88,6 +98,13 @@ Document content to analyze:
 def login_user(email, password):
     return email == "admin" and password == "admin123"
 
+def log_user_action(action, details):
+    st.session_state['user_actions'].append({
+        'timestamp': datetime.now(),
+        'action': action,
+        'details': details
+    })
+
 def check_expired_items():
     current_time = datetime.now()
     for doc_id, expiration_time in list(st.session_state['document_removal_times'].items()):
@@ -97,60 +114,83 @@ def check_expired_items():
 
 def show_upload_section():
     st.header("Upload Documents 📤")
+    
+    # File uploader
     uploaded_files = st.file_uploader("Choose files", type=None, accept_multiple_files=True)
     
     if uploaded_files:
-        with st.spinner("Processing documents..."):
-            for uploaded_file in uploaded_files:
-                doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
-                st.session_state['doc_id_counter'] += 1
-                upload_time = datetime.now()
-                
-                try:
-                    text_content = extract_text_content(uploaded_file)
-                    if text_content.strip():
-                        analysis = analyze_with_claude(text_content)
-                        
-                        if analysis:
-                            doc_data = {
-                                'id': doc_id,
-                                'name': uploaded_file.name,
-                                'status': 'Pending',
-                                'upload_time': upload_time,
-                                'analysis': analysis,
-                                'file_type': uploaded_file.type,
-                                'file_size': uploaded_file.size
-                            }
-                            
-                            st.session_state['documents'].append(doc_data)
-                            st.session_state['history'].append({
-                                'date': upload_time.strftime("%Y-%m-%d %H:%M:%S"),
-                                'id': doc_id,
-                                'name': uploaded_file.name,
-                                'status': f"Pending {STATUS_EMOJIS['Pending']}",
-                                'analysis': analysis
-                            })
-                            
-                            with st.expander(f"📄 Analysis for {uploaded_file.name}"):
-                                tab1, tab2 = st.tabs(["Formatted Analysis", "Raw Analysis"])
-                                
-                                with tab1:
-                                    sections = analysis.split('\n')
-                                    for section in sections:
-                                        if any(header in section for header in ["NAMES:", "KEY INFORMATION:", "DOCUMENT TYPE:", 
-                                                                              "DATES & NUMBERS:", "RELATIONSHIPS:", "SUMMARY:"]):
-                                            st.markdown(f"### {section}")
-                                        elif section.strip():
-                                            st.write(section)
-                                
-                                with tab2:
-                                    st.text_area("Full Analysis", analysis, height=300)
-                
-                except Exception as e:
-                    st.error(f"Error processing {uploaded_file.name}: {str(e)}")
-                    continue
+        for uploaded_file in uploaded_files:
+            doc_id = f"SIGN{st.session_state['doc_id_counter']:03d}"
+            st.session_state['doc_id_counter'] += 1
             
-            st.success(f"Successfully processed {len(uploaded_files)} document(s)!")
+            # Add to pending analysis
+            if not any(doc['name'] == uploaded_file.name for doc in st.session_state['pending_analysis']):
+                doc_data = {
+                    'id': doc_id,
+                    'name': uploaded_file.name,
+                    'status': 'Pending',
+                    'upload_time': datetime.now(),
+                    'file_type': uploaded_file.type,
+                    'file_size': uploaded_file.size,
+                    'content': extract_text_content(uploaded_file),
+                    'analyzed': False
+                }
+                st.session_state['pending_analysis'].append(doc_data)
+                log_user_action('upload', f"Uploaded document: {uploaded_file.name}")
+        
+        st.success(f"Successfully uploaded {len(uploaded_files)} document(s)!")
+
+    # Show pending documents
+    if st.session_state['pending_analysis']:
+        st.subheader("Documents Pending Analysis")
+        
+        selected_docs = []
+        for doc in st.session_state['pending_analysis']:
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                selected = st.checkbox(
+                    f"📄 {doc['name']} ({doc['file_type']}) - {doc['file_size']/1024:.1f} KB",
+                    key=f"select_{doc['id']}"
+                )
+                if selected:
+                    selected_docs.append(doc)
+        
+        if selected_docs:
+            if st.button(f"Process Selected Documents ({len(selected_docs)})", type="primary"):
+                with st.spinner("Processing selected documents..."):
+                    for doc in selected_docs:
+                        # Analyze document
+                        analysis = analyze_with_claude(doc['content'])
+                        
+                        # Add to documents list
+                        doc_data = {
+                            'id': doc['id'],
+                            'name': doc['name'],
+                            'status': 'Pending',
+                            'upload_time': doc['upload_time'],
+                            'analysis': analysis,
+                            'file_type': doc['file_type'],
+                            'file_size': doc['file_size']
+                        }
+                        
+                        st.session_state['documents'].append(doc_data)
+                        st.session_state['history'].append({
+                            'date': doc['upload_time'].strftime("%Y-%m-%d %H:%M:%S"),
+                            'id': doc['id'],
+                            'name': doc['name'],
+                            'status': f"Pending {STATUS_EMOJIS['Pending']}",
+                            'analysis': analysis
+                        })
+                        
+                        # Remove from pending
+                        st.session_state['pending_analysis'] = [
+                            d for d in st.session_state['pending_analysis'] if d['id'] != doc['id']
+                        ]
+                        
+                        log_user_action('process', f"Processed document: {doc['name']}")
+                
+                st.success("Selected documents processed successfully!")
+                st.rerun()
 
 def show_status_section():
     st.header("Document Status 📋")
@@ -175,7 +215,24 @@ def show_status_section():
                     with col2:
                         if st.button(f"View", key=f"view_{doc['id']}"):
                             with st.expander("Analysis", expanded=True):
-                                st.write(doc['analysis'])
+                                if doc.get('analysis'):
+                                    tab1, tab2 = st.tabs(["Formatted Analysis", "Raw Analysis"])
+                                    
+                                    with tab1:
+                                        sections = doc['analysis'].split('\n')
+                                        for section in sections:
+                                            if any(header in section for header in ["NAMES:", "KEY INFORMATION:", 
+                                                                                  "DOCUMENT TYPE:", "DATES & NUMBERS:", 
+                                                                                  "RELATIONSHIPS:", "SUMMARY:"]):
+                                                st.markdown(f"### {section}")
+                                            elif section.strip():
+                                                st.write(section)
+                                    
+                                    with tab2:
+                                        st.text_area("Full Analysis", doc['analysis'], height=300)
+                                else:
+                                    st.info("No analysis available")
+                    
                     with col3:
                         if st.button(f"Accept", key=f"accept_{doc['id']}"):
                             doc['status'] = "Authorized"
@@ -186,7 +243,9 @@ def show_status_section():
                                     hist_doc['date'] = action_time.strftime("%Y-%m-%d %H:%M:%S")
                             st.session_state['action_times'].append((doc['upload_time'], action_time))
                             st.session_state['document_removal_times'][doc['id']] = datetime.now() + timedelta(minutes=5)
+                            log_user_action('authorize', f"Authorized document: {doc['name']}")
                             st.rerun()
+                    
                     with col4:
                         if st.button(f"Reject", key=f"reject_{doc['id']}"):
                             doc['status'] = "Rejected"
@@ -197,6 +256,7 @@ def show_status_section():
                                     hist_doc['date'] = action_time.strftime("%Y-%m-%d %H:%M:%S")
                             st.session_state['action_times'].append((doc['upload_time'], action_time))
                             st.session_state['document_removal_times'][doc['id']] = datetime.now() + timedelta(minutes=5)
+                            log_user_action('reject', f"Rejected document: {doc['name']}")
                             st.rerun()
                 st.divider()
     else:
@@ -232,56 +292,21 @@ def show_history_section():
                     "status": "Status"
                 }
             )
+            
+            # Export option
+            if st.button("Export History"):
+                csv = filtered_df.to_csv(index=False)
+                st.download_button(
+                    "Download CSV",
+                    csv,
+                    "document_history.csv",
+                    "text/csv",
+                    key='download-csv'
+                )
         else:
             st.info("No documents found in selected date range")
     else:
         st.info("No document history available")
-
-def show_analytics_section():
-    st.header("Analytics Dashboard 📊")
-    
-    if st.session_state['history']:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Status Distribution
-            st.subheader("Document Status Distribution")
-            df_history = pd.DataFrame(st.session_state['history'])
-            status_counts = df_history['status'].apply(lambda x: x.split()[0]).value_counts()
-            st.bar_chart(status_counts)
-            
-            # Status Percentages
-            st.subheader("Status Breakdown")
-            total = len(df_history)
-            for status, count in status_counts.items():
-                percentage = (count / total) * 100
-                st.metric(f"{status}", f"{percentage:.1f}%")
-        
-        with col2:
-            # Time Analysis
-            if st.session_state['action_times']:
-                st.subheader("Processing Time Analysis")
-                time_diffs = [(action - upload).total_seconds() for upload, action in st.session_state['action_times']]
-                avg_time = sum(time_diffs) / len(time_diffs)
-                max_time = max(time_diffs)
-                min_time = min(time_diffs)
-                
-                st.metric("Average Processing Time", f"{avg_time:.1f} seconds")
-                st.metric("Fastest Processing", f"{min_time:.1f} seconds")
-                st.metric("Slowest Processing", f"{max_time:.1f} seconds")
-                
-                # Processing Time Distribution
-                st.subheader("Processing Time Distribution")
-                time_df = pd.DataFrame(time_diffs, columns=['seconds'])
-                st.line_chart(time_df)
-        
-        # Document Volume Trends
-        st.subheader("Document Volume Trends")
-        df_history['date'] = pd.to_datetime(df_history['date'])
-        daily_volumes = df_history.groupby(df_history['date'].dt.date).size()
-        st.line_chart(daily_volumes)
-    else:
-        st.info("No data available for analytics")
 
 def main():
     if not st.session_state['logged_in']:
@@ -293,6 +318,7 @@ def main():
             if submitted:
                 if login_user(email, password):
                     st.session_state['logged_in'] = True
+                    log_user_action('login', 'User logged in')
                     st.success("Login successful!")
                     st.rerun()
                 else:
@@ -311,8 +337,9 @@ def main():
                 if st.button("👤 My Profile"):
                     st.info("Profile settings coming soon")
                 if st.button("ℹ️ About"):
-                    st.info("Document Analyzer & Signer v2.0")
+                    st.info("Document Analyzer & Signer v3.0")
                 if st.button("🚪 Logout"):
+                    log_user_action('logout', 'User logged out')
                     st.session_state['logged_in'] = False
                     st.rerun()
         
@@ -323,6 +350,7 @@ def main():
                               key="selected_view")
         
         # Main content based on selected view
+        # Main content based on selected view
         if view == "Upload":
             show_upload_section()
         elif view == "Status":
@@ -330,7 +358,318 @@ def main():
         elif view == "History":
             show_history_section()
         elif view == "Analytics":
-            show_analytics_section()
+            st.header("Analytics Dashboard 📊")
+            
+            # Basic analytics - Part 1 (more advanced features coming in Part 2)
+            if st.session_state['history']:
+                tab1, tab2 = st.tabs(["Document Overview", "Processing Times"])
+                
+                with tab1:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        # Status Distribution
+                        st.subheader("Document Status Distribution")
+                        df_history = pd.DataFrame(st.session_state['history'])
+                        status_counts = df_history['status'].apply(lambda x: x.split()[0]).value_counts()
+                        st.bar_chart(status_counts)
+                    
+                    with col2:
+                        # Quick Stats
+                        st.subheader("Quick Statistics")
+                        total_docs = len(df_history)
+                        pending_docs = len([d for d in st.session_state['documents'] if d['status'] == 'Pending'])
+                        analyzed_docs = len([d for d in st.session_state['documents'] if 'analysis' in d])
+                        
+                        st.metric("Total Documents", total_docs)
+                        st.metric("Pending Documents", pending_docs)
+                        st.metric("Analyzed Documents", analyzed_docs)
+                
+                with tab2:
+                    if st.session_state['action_times']:
+                        st.subheader("Processing Time Analysis")
+                        time_diffs = [(action - upload).total_seconds() 
+                                    for upload, action in st.session_state['action_times']]
+                        
+                        avg_time = sum(time_diffs) / len(time_diffs)
+                        max_time = max(time_diffs)
+                        min_time = min(time_diffs)
+                        
+                        cols = st.columns(3)
+                        with cols[0]:
+                            st.metric("Average Time", f"{avg_time:.1f}s")
+                        with cols[1]:
+                            st.metric("Fastest", f"{min_time:.1f}s")
+                        with cols[2]:
+                            st.metric("Slowest", f"{max_time:.1f}s")
+                        
+                        # Processing Time Trend
+                        st.subheader("Processing Time Trend")
+                        time_df = pd.DataFrame(time_diffs, columns=['seconds'])
+                        st.line_chart(time_df)
+                
+                # Document Volume Trend
+                st.subheader("Document Volume Trend")
+                df_history['date'] = pd.to_datetime(df_history['date'])
+                daily_volumes = df_history.groupby(df_history['date'].dt.date).size()
+                st.area_chart(daily_volumes)
+                
+                # Pending Analysis
+                if st.session_state['pending_analysis']:
+                    st.subheader("Documents Awaiting Analysis")
+                    pending_df = pd.DataFrame(st.session_state['pending_analysis'])
+                    st.dataframe(
+                        pending_df[['name', 'upload_time', 'file_type', 'file_size']],
+                        hide_index=True
+                    )
+            else:
+                st.info("No data available for analytics yet")
 
 if __name__ == "__main__":
-    main()
+    main()  
+
+def generate_custom_report(start_date, end_date, metrics):
+    """Generate custom report based on selected metrics"""
+    report_data = {}
+    
+    df_history = pd.DataFrame(st.session_state['history'])
+    df_history['date'] = pd.to_datetime(df_history['date'])
+    mask = (df_history['date'].dt.date >= start_date) & (df_history['date'].dt.date <= end_date)
+    filtered_df = df_history[mask]
+    
+    if 'document_stats' in metrics:
+        report_data['document_stats'] = {
+            'total_documents': len(filtered_df),
+            'status_distribution': filtered_df['status'].apply(lambda x: x.split()[0]).value_counts().to_dict(),
+            'file_types': pd.DataFrame(st.session_state['documents'])['file_type'].value_counts().to_dict(),
+            'avg_file_size': pd.DataFrame(st.session_state['documents'])['file_size'].mean() / 1024  # KB
+        }
+    
+    if 'processing_times' in metrics:
+        time_diffs = [(action - upload).total_seconds() 
+                     for upload, action in st.session_state['action_times']]
+        report_data['processing_times'] = {
+            'average_time': sum(time_diffs) / len(time_diffs) if time_diffs else 0,
+            'max_time': max(time_diffs) if time_diffs else 0,
+            'min_time': min(time_diffs) if time_diffs else 0,
+            'time_distribution': pd.qcut(time_diffs, 4).value_counts().to_dict() if time_diffs else {}
+        }
+    
+    if 'user_activity' in metrics:
+        df_actions = pd.DataFrame(st.session_state['user_actions'])
+        if not df_actions.empty:
+            df_actions['timestamp'] = pd.to_datetime(df_actions['timestamp'])
+            mask = (df_actions['timestamp'].dt.date >= start_date) & 
+                  (df_actions['timestamp'].dt.date <= end_date)
+            filtered_actions = df_actions[mask]
+            
+            report_data['user_activity'] = {
+                'total_actions': len(filtered_actions),
+                'action_types': filtered_actions['action'].value_counts().to_dict(),
+                'daily_activity': filtered_actions.groupby(
+                    filtered_actions['timestamp'].dt.date
+                ).size().to_dict()
+            }
+    
+    if 'performance_metrics' in metrics:
+        report_data['performance_metrics'] = {
+            'approval_rate': len(filtered_df[filtered_df['status'].str.contains('Authorized')]) / 
+                           len(filtered_df) if len(filtered_df) > 0 else 0,
+            'rejection_rate': len(filtered_df[filtered_df['status'].str.contains('Rejected')]) / 
+                            len(filtered_df) if len(filtered_df) > 0 else 0,
+            'average_processing_time': np.mean(time_diffs) if time_diffs else 0
+        }
+    
+    return report_data
+
+def show_enhanced_analytics():
+    st.title("Enhanced Analytics Dashboard 📊")
+    
+    # Main Analytics Tabs
+    tabs = st.tabs(["Document Analytics", "User Activity", "Performance Metrics", "Custom Reports"])
+    
+    with tabs[0]:  # Document Analytics
+        st.header("Document Analytics")
+        
+        if st.session_state['history']:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Enhanced Status Distribution
+                st.subheader("Status Distribution")
+                df_history = pd.DataFrame(st.session_state['history'])
+                status_counts = df_history['status'].apply(lambda x: x.split()[0]).value_counts()
+                fig_status = px.pie(values=status_counts.values, 
+                                  names=status_counts.index, 
+                                  title="Document Status Distribution")
+                st.plotly_chart(fig_status)
+                
+                # Document Types Analysis
+                st.subheader("Document Types")
+                doc_types = pd.DataFrame(st.session_state['documents'])['file_type'].value_counts()
+                fig_types = px.bar(x=doc_types.index, 
+                                 y=doc_types.values, 
+                                 title="Document Types Distribution")
+                st.plotly_chart(fig_types)
+            
+            with col2:
+                # Processing Time Distribution
+                if st.session_state['action_times']:
+                    st.subheader("Processing Time Distribution")
+                    time_diffs = [(action - upload).total_seconds() 
+                                for upload, action in st.session_state['action_times']]
+                    fig_time = px.histogram(x=time_diffs, 
+                                          title="Processing Time Distribution",
+                                          labels={'x': 'Time (seconds)'})
+                    st.plotly_chart(fig_time)
+                
+                # Document Size Analysis
+                st.subheader("Document Sizes")
+                doc_sizes = pd.DataFrame(st.session_state['documents'])['file_size'] / 1024  # KB
+                fig_sizes = px.box(doc_sizes, 
+                                 title="Document Size Distribution (KB)")
+                st.plotly_chart(fig_sizes)
+    
+    with tabs[1]:  # User Activity
+        st.header("User Activity Analysis")
+        
+        if st.session_state['user_actions']:
+            df_actions = pd.DataFrame(st.session_state['user_actions'])
+            df_actions['timestamp'] = pd.to_datetime(df_actions['timestamp'])
+            
+            # Activity Timeline
+            st.subheader("Activity Timeline")
+            daily_activity = df_actions.groupby(df_actions['timestamp'].dt.date).size()
+            fig_timeline = px.line(x=daily_activity.index, 
+                                 y=daily_activity.values,
+                                 title="Daily Activity Volume")
+            st.plotly_chart(fig_timeline)
+            
+            # Action Type Distribution
+            st.subheader("Action Type Distribution")
+            action_counts = df_actions['action'].value_counts()
+            fig_actions = px.pie(values=action_counts.values,
+                               names=action_counts.index,
+                               title="User Actions Distribution")
+            st.plotly_chart(fig_actions)
+            
+            # Hourly Activity Heatmap
+            st.subheader("Hourly Activity Pattern")
+            hourly_activity = df_actions.groupby([
+                df_actions['timestamp'].dt.dayofweek,
+                df_actions['timestamp'].dt.hour
+            ]).size().unstack()
+            fig_heatmap = px.imshow(hourly_activity,
+                                  title="Activity Heatmap by Hour and Day",
+                                  labels=dict(x="Hour of Day", y="Day of Week"))
+            st.plotly_chart(fig_heatmap)
+    
+    with tabs[2]:  # Performance Metrics
+        st.header("Performance Metrics")
+        
+        if st.session_state['history']:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Processing Efficiency
+                st.subheader("Processing Efficiency")
+                processing_times = pd.Series([(action - upload).total_seconds() 
+                                           for upload, action in st.session_state['action_times']])
+                
+                efficiency_metrics = {
+                    "Average Processing Time": f"{processing_times.mean():.1f}s",
+                    "90th Percentile": f"{processing_times.quantile(0.9):.1f}s",
+                    "Processing Time StdDev": f"{processing_times.std():.1f}s"
+                }
+                
+                for metric, value in efficiency_metrics.items():
+                    st.metric(metric, value)
+                
+                # Efficiency Trend
+                fig_trend = px.line(y=processing_times.rolling(5).mean(),
+                                  title="Processing Time Trend (5-doc rolling average)")
+                st.plotly_chart(fig_trend)
+            
+            with col2:
+                # Success Metrics
+                st.subheader("Success Metrics")
+                df_history = pd.DataFrame(st.session_state['history'])
+                total_docs = len(df_history)
+                
+                approval_rate = len(df_history[df_history['status'].str.contains('Authorized')]) / total_docs
+                rejection_rate = len(df_history[df_history['status'].str.contains('Rejected')]) / total_docs
+                
+                st.metric("Approval Rate", f"{approval_rate:.1%}")
+                st.metric("Rejection Rate", f"{rejection_rate:.1%}")
+                
+                # Daily Success Rates
+                df_history['date'] = pd.to_datetime(df_history['date'])
+                daily_rates = df_history.groupby(df_history['date'].dt.date).agg({
+                    'status': lambda x: sum(x.str.contains('Authorized')) / len(x)
+                })
+                
+                fig_rates = px.line(daily_rates,
+                                  title="Daily Approval Rates")
+                st.plotly_chart(fig_rates)
+    
+    with tabs[3]:  # Custom Reports
+        st.header("Custom Report Generator")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("Start Date", 
+                                     value=datetime.now() - timedelta(days=30))
+        with col2:
+            end_date = st.date_input("End Date",
+                                   value=datetime.now())
+        
+        # Select metrics to include
+        st.subheader("Select Metrics to Include")
+        metrics = st.multiselect(
+            "Choose metrics for your report",
+            ["document_stats", "processing_times", "user_activity", "performance_metrics"],
+            default=["document_stats"]
+        )
+        
+        if st.button("Generate Report"):
+            report_data = generate_custom_report(start_date, end_date, metrics)
+            
+            st.subheader("Generated Report")
+            st.json(report_data)
+            
+            # Export options
+            export_format = st.selectbox("Export Format", ["JSON", "CSV", "Excel"])
+            if st.button("Export Report"):
+                if export_format == "JSON":
+                    st.download_button(
+                        "Download JSON",
+                        data=json.dumps(report_data, indent=2),
+                        file_name="analytics_report.json",
+                        mime="application/json"
+                    )
+                elif export_format == "CSV":
+                    df_report = pd.json_normalize(report_data)
+                    st.download_button(
+                        "Download CSV",
+                        data=df_report.to_csv(index=False),
+                        file_name="analytics_report.csv",
+                        mime="text/csv"
+                    )
+                else:  # Excel
+                    with io.BytesIO() as buffer:
+                        df_report = pd.json_normalize(report_data)
+                        df_report.to_excel(buffer, index=False)
+                        st.download_button(
+                            "Download Excel",
+                            data=buffer.getvalue(),
+                            file_name="analytics_report.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+
+# Update the main function to use enhanced analytics
+def main():
+    # ... (previous main code remains the same until the view selection)
+    
+    if view == "Analytics":
+        show_enhanced_analytics()
+    # ... (rest of the main function remains the same)
+
